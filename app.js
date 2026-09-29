@@ -547,20 +547,6 @@ async function boot() {
   // Load saved config
   FB_URL    = localStorage.getItem('ca_fb_url')    || 'https://court-automation-2-default-rtdb.firebaseio.com/';
   FB_APIKEY = localStorage.getItem('ca_fb_apikey') || 'AIzaSyBrgmFp4EXnO7Bb358fZdydk5HpI1UGS3o';
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBrgmFp4EXnO7Bb358fZdydk5HpI1UGS3o",
-  authDomain: "court-automation-2.firebaseapp.com",
-  projectId: "court-automation-2",
-  storageBucket: "court-automation-2.firebasestorage.app",
-  messagingSenderId: "633897887982",
-  appId: "1:633897887982:web:e11a3bba68898735d8ebff"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);';
   FB_PREFIX = localStorage.getItem('ca_fb_prefix') || '/automation';
 
   // Pre-fill settings inputs
