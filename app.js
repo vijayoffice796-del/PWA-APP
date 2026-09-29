@@ -563,6 +563,22 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);';
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyBrgmFp4EXnO7Bb358fZdydk5HpI1UGS3o",
+  authDomain: "court-automation-2.firebaseapp.com",
+  projectId: "court-automation-2",
+  storageBucket: "court-automation-2.firebasestorage.app",
+  messagingSenderId: "633897887982",
+  appId: "1:633897887982:web:e11a3bba68898735d8ebff"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);';
   FB_PREFIX = localStorage.getItem('ca_fb_prefix') || '/automation';
 
   // Pre-fill settings inputs
