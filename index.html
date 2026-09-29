@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#4f46e5"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <title>Court Automation</title>
+  <link rel="manifest" href="manifest.json"/>
+
+  <!-- Firebase 8 compat CDN -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <!-- HTML5-QRCode -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- Tesseract.js -->
+  <script src="https://unpkg.com/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --indigo:#4f46e5; --indigo-dk:#3730a3; --indigo-lt:#e0e7ff;
+      --green:#16a34a;  --green-lt:#dcfce7;  --red:#dc2626;
+      --orange:#ea580c; --purple:#7c3aed;
+      --slate-50:#f8fafc;  --slate-100:#f1f5f9; --slate-200:#e2e8f0;
+      --slate-300:#cbd5e1; --slate-400:#94a3b8; --slate-500:#64748b;
+      --slate-600:#475569; --slate-700:#334155; --slate-800:#1e293b;
+    }
+    html, body { height:100%; font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Arial,sans-serif;
+      background:var(--slate-100); color:var(--slate-800); font-size:14px;
+      -webkit-tap-highlight-color:transparent; overscroll-behavior:none; }
+
+    @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(22,163,74,.5)} 70%{box-shadow:0 0 0 8px rgba(22,163,74,0)} }
+    @keyframes pulse-red   { 0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.4)} 50%{box-shadow:0 0 0 6px rgba(220,38,38,0)} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes scanner-line { 0%{top:10%} 50%{top:88%} 100%{top:10%} }
+
+    /* ── SCREEN MANAGER ── */
+    .screen { display:none; min-height:100vh; flex-direction:column; }
+    .screen.active { display:flex; }
+
+    /* ── LOADING OVERLAY ── */
+    #loadingOverlay {
+      position:fixed; inset:0; background:rgba(15,23,42,.75);
+      display:none; flex-direction:column; align-items:center; justify-content:center;
+      z-index:9999; gap:14px;
+    }
+    #loadingOverlay.show { display:flex; }
+    .spinner { width:44px; height:44px; border:4px solid rgba(255,255,255,.2);
+      border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; }
+    .loading-txt { color:#fff; font-size:14px; font-weight:600; }
+
+    /* ── TOAST ── */
+    #toast {
+      position:fixed; bottom:calc(76px + env(safe-area-inset-bottom,0px));
+      left:50%; transform:translateX(-50%) translateY(16px);
+      background:var(--slate-800); color:#fff; padding:9px 20px;
+      border-radius:24px; font-size:13px; font-weight:600; z-index:9998;
+      opacity:0; transition:all .25s; white-space:nowrap; pointer-events:none;
+      max-width:90vw; text-align:center;
+    }
+    #toast.show  { opacity:1; transform:translateX(-50%) translateY(0); }
+    #toast.ok    { background:var(--green); }
+    #toast.err   { background:var(--red); }
+    #toast.warn  { background:var(--orange); }
+
+    /* ── HEADER ── */
+    .app-header {
+      background:linear-gradient(135deg,var(--indigo-dk),var(--indigo));
+      color:#fff; padding:10px 16px; padding-top:calc(10px + env(safe-area-inset-top,0px));
+      display:flex; align-items:center; justify-content:space-between;
+      box-shadow:0 2px 12px rgba(0,0,0,.2); position:sticky; top:0; z-index:100;
+    }
+    .app-header-left { display:flex; align-items:center; gap:8px; }
+    .app-title  { font-size:15px; font-weight:800; line-height:1.2; }
+    .app-sub    { font-size:10px; color:#c7d2fe; }
+    .scan-count { display:inline-flex; align-items:center; gap:5px; font-size:11px;
+      font-weight:600; padding:4px 10px; border-radius:20px;
+      background:rgba(255,255,255,.15); color:#fff; }
+
+    /* ── PC STATUS BAR ── */
+    .pc-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      background:#fff; padding:8px 16px; border-bottom:1px solid var(--slate-200);
+      font-size:12px; position:sticky; top:calc(56px + env(safe-area-inset-top,0px)); z-index:99;
+      box-shadow:0 1px 4px rgba(0,0,0,.04);
+    }
+    .pc-bar-left { display:flex; align-items:center; gap:8px; }
+    .pc-dot { width:10px; height:10px; border-radius:50%; background:var(--slate-300); flex-shrink:0; }
+    .pc-dot.online  { background:#4ade80; animation:pulse-green 2s infinite; }
+    .pc-dot.offline { background:#f87171; animation:pulse-red 1.5s infinite; }
+    .pc-dot.check   { background:#fbbf24; }
+    .pc-lbl { font-weight:600; color:var(--slate-700); }
+    .pc-lbl.online  { color:var(--green); }
+    .pc-lbl.offline { color:var(--red); }
+    .pc-time { font-size:10px; color:var(--slate-400); }
+
+    /* ── SCROLLABLE CONTENT ── */
+    .app-content { flex:1; overflow-y:auto; padding-bottom:calc(68px + env(safe-area-inset-bottom,0px)); }
+
+    /* ── BOTTOM TAB NAV ── */
+    .tab-nav {
+      position:fixed; bottom:0; left:0; right:0; background:#fff;
+      border-top:1px solid var(--slate-200); display:flex; z-index:200;
+      box-shadow:0 -2px 12px rgba(0,0,0,.08);
+      padding-bottom:env(safe-area-inset-bottom,0px);
+    }
+    .tab-btn {
+      flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      padding:7px 4px 5px; font-size:10px; font-weight:600; color:var(--slate-400);
+      cursor:pointer; border:none; background:transparent; transition:all .15s;
+      gap:3px; font-family:inherit;
+    }
+    .tab-btn .ti { font-size:20px; transition:transform .15s; }
+    .tab-btn.active { color:var(--indigo); }
+    .tab-btn.active .ti { transform:scale(1.15); }
+
+    /* ── TAB PANELS ── */
+    .tab-panel { display:none; padding:14px; animation:fadeIn .22s ease; }
+    .tab-panel.active { display:block; }
+
+    /* ── CARD ── */
+    .card { background:#fff; border:1px solid var(--slate-200); border-radius:12px;
+      padding:14px; margin-bottom:12px; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+    .card-title { font-size:13px; font-weight:700; color:var(--slate-700); margin-bottom:10px; }
+
+    /* ── BUTTONS ── */
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+      padding:11px 18px; border-radius:10px; font-size:13px; font-weight:700;
+      border:none; cursor:pointer; transition:all .15s; font-family:inherit; }
+    .btn:active { transform:scale(.97); }
+    .btn:disabled { opacity:.4; cursor:not-allowed; }
+    .btn-full { width:100%; }
+    .btn-half { flex:1; }
+    .btn-primary  { background:var(--indigo);  color:#fff; }
+    .btn-green    { background:var(--green);   color:#fff; }
+    .btn-red-soft { background:#fee2e2; color:var(--red); }
+    .btn-dark     { background:var(--slate-700); color:#fff; }
+    .btn-orange   { background:var(--orange);  color:#fff; }
+    .btn-sm { padding:7px 12px; font-size:12px; }
+
+    /* ── CHECKBOX ROW ── */
+    .check-row {
+      display:flex; align-items:center; gap:10px; padding:10px 14px;
+      background:#fff; border:1.5px solid var(--slate-200); border-radius:10px;
+      cursor:pointer; margin-bottom:12px; user-select:none; transition:all .15s;
+    }
+    .check-row.on { border-color:var(--indigo); background:var(--indigo-lt); }
+    .check-row input { display:none; }
+    .chk-box {
+      width:20px; height:20px; border:2px solid var(--slate-300); border-radius:5px;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+      background:#fff; transition:all .15s;
+    }
+    .check-row.on .chk-box { background:var(--indigo); border-color:var(--indigo); }
+    .chk-box::after { content:'✓'; color:#fff; font-size:12px; font-weight:700; display:none; }
+    .check-row.on .chk-box::after { display:block; }
+    .chk-main { font-size:13px; font-weight:600; color:var(--slate-700); }
+    .chk-sub  { font-size:11px; color:var(--slate-500); margin-top:1px; }
+
+    /* ── CAMERA ── */
+    .cam-wrap {
+      position:relative; background:#000; border-radius:12px; overflow:hidden;
+      margin-bottom:12px; min-height:280px; display:flex; align-items:center; justify-content:center;
+    }
+    #qr-reader { width:100% !important; border-radius:12px !important; }
+    #qr-reader video { border-radius:12px !important; object-fit:cover; }
+    #qr-reader__dashboard_section_csr button {
+      background:var(--indigo) !important; border-radius:8px !important;
+      color:#fff !important; font-weight:600 !important; padding:8px 16px !important; border:none !important;
+    }
+    #qr-reader__camera_selection {
+      width:100% !important; border:1px solid var(--slate-200) !important;
+      border-radius:8px !important; padding:6px 10px !important; margin-top:6px !important;
+    }
+    /* Scanner overlay */
+    .scan-overlay { position:absolute; inset:0; pointer-events:none; z-index:10; display:none; }
+    .scan-overlay.on { display:block; }
+    .scan-frame {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:62%; aspect-ratio:1; border:2.5px solid rgba(255,255,255,.7); border-radius:10px;
+    }
+    .scan-frame::before, .scan-frame::after {
+      content:''; position:absolute; width:20px; height:20px; border-color:var(--indigo); border-style:solid;
+    }
+    .scan-frame::before { top:-3px; left:-3px; border-width:3px 0 0 3px; border-radius:5px 0 0 0; }
+    .scan-frame::after  { bottom:-3px; right:-3px; border-width:0 3px 3px 0; border-radius:0 0 5px 0; }
+    .scan-line {
+      position:absolute; left:22%; right:22%; height:2px;
+      background:linear-gradient(90deg,transparent,var(--indigo),transparent);
+      animation:scanner-line 2s ease-in-out infinite; border-radius:2px;
+    }
+    /* Placeholder */
+    .cam-placeholder { display:flex; flex-direction:column; align-items:center;
+      justify-content:center; gap:10px; padding:40px 20px; color:#fff; text-align:center; }
+    .cam-ph-icon { font-size:52px; opacity:.6; }
+    .cam-ph-txt  { font-size:13px; color:rgba(255,255,255,.7); line-height:1.5; }
+    /* Cam controls */
+    .cam-ctrl { display:flex; gap:10px; margin-bottom:12px; }
+    /* Scan result */
+    .scan-result { border-radius:10px; padding:12px 14px; display:none; animation:fadeIn .2s; }
+    .scan-result.show { display:block; }
+    .scan-result.ok  { background:var(--green-lt); border:1.5px solid #86efac; }
+    .scan-result.err { background:#fee2e2; border:1.5px solid #fca5a5; }
+    .res-label { font-size:10px; font-weight:700; color:var(--slate-500); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+    .res-value { font-family:monospace; font-size:15px; font-weight:700; color:var(--slate-800); word-break:break-all; }
+    .res-meta  { font-size:11px; color:var(--slate-500); margin-top:4px; }
+
+    /* ── OCR ── */
+    .ocr-drop {
+      border:2.5px dashed var(--slate-300); border-radius:12px; padding:28px 20px;
+      text-align:center; cursor:pointer; background:#fff; margin-bottom:12px; transition:all .2s;
+    }
+    .ocr-drop:active { background:var(--indigo-lt); border-color:var(--indigo); }
+    .ocr-drop input { display:none; }
+    .ocr-preview { width:100%; border-radius:8px; margin-bottom:12px; display:none;
+      max-height:240px; object-fit:contain; border:1px solid var(--slate-200); background:var(--slate-50); }
+    .ocr-preview.show { display:block; }
+    .ocr-prog { display:none; margin-bottom:12px; }
+    .ocr-prog.show { display:block; }
+    .prog-bar-wrap { background:var(--slate-200); border-radius:20px; height:8px; overflow:hidden; margin-bottom:4px; }
+    .prog-bar { height:100%; background:linear-gradient(90deg,var(--indigo),var(--purple)); border-radius:20px; width:0%; transition:width .3s; }
+    .prog-label { font-size:11px; color:var(--slate-500); text-align:center; }
+    .ocr-result { background:var(--slate-50); border:1px solid var(--slate-200); border-radius:8px;
+      padding:12px; font-size:12px; font-family:monospace; line-height:1.6; color:var(--slate-700);
+      max-height:160px; overflow-y:auto; display:none; white-space:pre-wrap; word-break:break-word; }
+    .ocr-result.show { display:block; }
+
+    /* ── MANUAL ── */
+    .manual-input {
+      width:100%; border:2px solid var(--slate-200); border-radius:10px; padding:12px 14px;
+      font-size:15px; font-family:monospace; letter-spacing:1px; outline:none; background:#fff;
+      transition:border-color .2s,box-shadow .2s; margin-bottom:10px;
+    }
+    .manual-input:focus { border-color:var(--indigo); box-shadow:0 0 0 4px var(--indigo-lt); }
+
+    /* ── INFO BOXES ── */
+    .info { border-radius:8px; padding:10px 12px; font-size:12px; line-height:1.5; margin-bottom:10px; }
+    .info-blue   { background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; }
+    .info-orange { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; }
+    .info-green  { background:var(--green-lt); border:1px solid #86efac; color:#15803d; }
+
+    /* ── TAG SELECTOR ── */
+    .tag-strip {
+      display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px;
+    }
+    .tag-chip {
+      padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600;
+      border:1.5px solid var(--slate-200); background:#fff; cursor:pointer;
+      transition:all .15s; color:var(--slate-600); white-space:nowrap;
+    }
+    .tag-chip:active { transform:scale(.95); }
+    .tag-chip.active { background:var(--indigo); color:#fff; border-color:var(--indigo); }
+    .tag-custom-row { display:flex; gap:8px; margin-bottom:12px; }
+    .tag-custom-input {
+      flex:1; border:1.5px solid var(--slate-200); border-radius:8px;
+      padding:7px 12px; font-size:13px; outline:none; font-family:inherit; background:#fff;
+      transition:border-color .2s;
+    }
+    .tag-custom-input:focus { border-color:var(--indigo); }
+
+    /* ── OFFLINE BADGE ── */
+    .offline-badge {
+      display:none; background:#dc2626; color:#fff; font-size:11px; font-weight:700;
+      padding:3px 10px; border-radius:20px; margin-left:8px;
+    }
+
+    /* ── SETTINGS SCREEN ── */
+    .settings-card { background:#fff; border:1px solid var(--slate-200); border-radius:12px; overflow:hidden; margin-bottom:12px; }
+    .settings-hdr { padding:10px 14px; background:var(--slate-50); border-bottom:1px solid var(--slate-200); font-size:12px; font-weight:700; color:var(--slate-700); }
+    .settings-body { padding:14px; }
+    .s-label { font-size:12px; font-weight:600; color:var(--slate-600); margin-bottom:5px; display:block; }
+    .s-hint  { font-size:11px; color:var(--slate-400); margin-top:4px; }
+    .s-input { width:100%; border:1px solid var(--slate-200); border-radius:8px; padding:9px 12px;
+      font-size:13px; outline:none; font-family:inherit; background:#fff; margin-bottom:10px;
+      transition:border-color .2s,box-shadow .2s; }
+    .s-input:focus { border-color:var(--indigo); box-shadow:0 0 0 3px var(--indigo-lt); }
+    .s-err { font-size:12px; color:var(--red); display:none; margin-top:4px; }
+    .s-err.show { display:block; }
+    .s-ok  { font-size:12px; color:var(--green); display:none; margin-top:4px; }
+    .s-ok.show  { display:block; }
+  </style>
+</head>
+<body>
+
+<!-- LOADING OVERLAY -->
+<div id="loadingOverlay" class="show">
+  <div class="spinner"></div>
+  <div class="loading-txt" id="loadingTxt">Initializing…</div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- ════════════════════
+     MAIN APP SCREEN (no login gate — opens directly)
+════════════════════ -->
+<div class="screen active" id="appScreen">
+
+  <!-- Header -->
+  <div class="app-header">
+    <div class="app-header-left">
+      <span style="font-size:22px;">⚖️</span>
+      <div>
+        <div class="app-title">Court Automation</div>
+        <div class="app-sub">Mobile Scanner · PWA</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;">
+      <div class="scan-count">📋 <span id="scanCountDisplay">0</span> Scanned</div>
+      <span class="offline-badge" id="offlineQueueBadge"></span>
+    </div>
+  </div>
+
+  <!-- PC Status Bar -->
+  <div class="pc-bar">
+    <div class="pc-bar-left">
+      <span class="pc-dot check" id="pcDot"></span>
+      <span class="pc-lbl" id="pcLabel">Firebase check हो रहा है…</span>
+    </div>
+    <span class="pc-time" id="pcTime"></span>
+  </div>
+
+  <!-- Scrollable Content -->
+  <div class="app-content">
+
+    <!-- ═══ TAB: QR SCAN ═══ -->
+    <div class="tab-panel active" id="tab-qr">
+
+      <!-- Tag selector (Step 6) -->
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:8px;">🏷️ Tag / Label चुनें</div>
+        <div class="tag-strip" id="tagStrip">
+          <button class="tag-chip active" data-tag="">None</button>
+          <button class="tag-chip" data-tag="Summons / Notices (समन / नोटिस)">Summons</button>
+          <button class="tag-chip" data-tag="Appearance (हाजिरी)">Appearance</button>
+          <button class="tag-chip" data-tag="Evidence (साक्ष्य)">Evidence</button>
+          <button class="tag-chip" data-tag="Final Argument (अंतिम बहस)">Final Arg</button>
+          <button class="tag-chip" data-tag="Order / Judgment (आदेश / निर्णय)">Order</button>
+          <button class="tag-chip" data-tag="Urgent (अति आवश्यक)">Urgent</button>
+        </div>
+        <div class="tag-custom-row">
+          <input class="tag-custom-input" type="text" id="customTagInput"
+            placeholder="या कोई custom tag लिखें…"/>
+          <button class="btn btn-dark btn-sm" id="setCustomTagBtn">Set</button>
+        </div>
+        <div style="font-size:10px;color:var(--slate-400);">
+          Active tag: <span id="activeTagLabel" style="font-weight:600;color:var(--indigo);">None</span>
+        </div>
+      </div>
+
+      <!-- Continuous Scan checkbox -->
+      <label class="check-row" id="contScanRow" for="continuousScan">
+        <input type="checkbox" id="continuousScan"/>
+        <span class="chk-box"></span>
+        <div>
+          <div class="chk-main">🔄 Continuous Scan</div>
+          <div class="chk-sub">एक के बाद एक QR scan होते रहेंगे।</div>
+        </div>
+      </label>
+
+      <!-- Camera wrapper -->
+      <div class="cam-wrap" id="camWrap">
+        <div id="qr-reader" style="width:100%;"></div>
+        <div class="scan-overlay" id="scanOverlay">
+          <div class="scan-frame"><div class="scan-line"></div></div>
+        </div>
+        <div class="cam-placeholder" id="camPlaceholder">
+          <div class="cam-ph-icon">📷</div>
+          <div class="cam-ph-txt"><b>Start Camera</b> दबाएँ<br>और QR code सामने रखें।</div>
+        </div>
+      </div>
+
+      <!-- Camera buttons -->
+      <div class="cam-ctrl">
+        <button class="btn btn-green btn-half" id="startCamBtn">▶️ Start Camera</button>
+        <button class="btn btn-red-soft btn-half" id="stopCamBtn" disabled>⏹ Stop</button>
+      </div>
+
+      <!-- Result -->
+      <div class="scan-result" id="qrResult">
+        <div class="res-label">Last Scanned</div>
+        <div class="res-value" id="qrResultValue">—</div>
+        <div class="res-meta"  id="qrResultMeta"></div>
+      </div>
+
+      <div class="info info-blue">
+        💡 CNR number वाले QR automatically detect होंगे।<br>
+        Continuous Mode में debounce से duplicate scans रुकते हैं।
+      </div>
+    </div>
+
+    <!-- ═══ TAB: OCR SCAN ═══ -->
+    <div class="tab-panel" id="tab-ocr">
+      <label class="ocr-drop" for="ocrInput" id="ocrDrop">
+        <input type="file" id="ocrInput" accept="image/*" capture="environment"/>
+        <div style="font-size:40px;margin-bottom:8px;">📸</div>
+        <div style="font-size:13px;font-weight:600;color:var(--slate-600);">फ़ोटो खींचें या Gallery से चुनें</div>
+        <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Court order, CNR slip, कोई भी document</div>
+      </label>
+
+      <img class="ocr-preview" id="ocrPreview" alt="Preview"/>
+
+      <div class="ocr-prog" id="ocrProg">
+        <div class="prog-bar-wrap"><div class="prog-bar" id="ocrBar"></div></div>
+        <div class="prog-label" id="ocrProgLabel">Initializing OCR…</div>
+      </div>
+
+      <div class="card" id="ocrResultCard" style="display:none;">
+        <div class="card-title">📄 Extracted Text</div>
+        <div class="ocr-result show" id="ocrResultBox"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn btn-primary btn-half btn-sm" id="ocrCopyBtn">📋 Copy</button>
+          <button class="btn btn-dark btn-half btn-sm"    id="ocrClearBtn">🗑️ Clear</button>
+        </div>
+      </div>
+
+      <div class="info info-orange">
+        ⚠️ OCR पहली बार Tesseract model download करेगा (~20MB)।<br>
+        साफ रोशनी में लिया गया फोटो बेहतर result देगा।
+      </div>
+    </div>
+
+    <!-- ═══ TAB: SMART MANUAL ═══ -->
+    <div class="tab-panel" id="tab-manual">
+      <div class="card" style="margin-bottom:10px;">
+        <div class="card-title" style="margin-bottom:8px;">🏷️ Tag (optional)</div>
+        <div class="tag-strip" id="manualTagStrip">
+          <button class="tag-chip active" data-tag="">None</button>
+          <button class="tag-chip" data-tag="Summons / Notices (समन / नोटिस)">Summons</button>
+          <button class="tag-chip" data-tag="Appearance (हाजिरी)">Appearance</button>
+          <button class="tag-chip" data-tag="Evidence (साक्ष्य)">Evidence</button>
+          <button class="tag-chip" data-tag="Order / Judgment (आदेश / निर्णय)">Order</button>
+          <button class="tag-chip" data-tag="Urgent (अति आवश्यक)">Urgent</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">✍️ Manual CNR Entry</div>
+        <input class="manual-input" type="text" id="manualInput"
+          placeholder="CNR Number यहाँ लिखें…"
+          autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"/>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary btn-half" id="manualSendBtn">📤 Send to PC</button>
+          <button class="btn btn-dark btn-half"    id="manualClearBtn">🗑️ Clear</button>
+        </div>
+        <div class="s-ok"  id="manualOk"></div>
+      </div>
+      <div class="info info-blue">
+        💡 CNR manually type करके PC Extension को send करें।<br>
+        PC offline हो तो Pending Queue में जाएगा।
+      </div>
+    </div>
+
+    <!-- ═══ TAB: SETTINGS ═══ -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="settings-card">
+        <div class="settings-hdr">🔥 Firebase Configuration</div>
+        <div class="settings-body">
+          <label class="s-label">Database URL *</label>
+          <input class="s-input" type="url" id="cfgUrl" placeholder="https://your-project-default-rtdb.firebaseio.com"/>
+          <label class="s-label">Web API Key</label>
+          <input class="s-input" type="password" id="cfgApiKey" placeholder="Firebase Web API Key…" autocomplete="off"/>
+          <label class="s-label" style="margin-top:4px;">
+            Firebase Path Prefix
+            <span style="font-size:10px;color:var(--slate-400);font-weight:400;">(default: /automation)</span>
+          </label>
+          <input class="s-input" type="text" id="cfgPath" value="/automation" placeholder="/automation"/>
+          <div class="s-hint" style="margin-bottom:10px;">
+            Extension के same static path use करें।<br>
+            Firebase Console → Realtime Database → URL copy करें।
+          </div>
+          <button class="btn btn-primary btn-full" id="saveCfgBtn" style="font-size:13px;">
+            💾 Save &amp; Connect
+          </button>
+          <div class="s-err" id="cfgError"></div>
+          <div class="s-ok"  id="cfgOk"></div>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <div class="settings-hdr">📊 Connection Status</div>
+        <div class="settings-body" style="font-size:12px;line-height:1.9;color:var(--slate-600);">
+          Firebase: <span id="cfgStatusLabel" style="font-weight:600;">Not configured</span><br>
+          PC Status: <span id="cfgPcStatus" style="font-weight:600;">—</span><br>
+          DB URL: <span id="cfgUrlDisplay" style="font-family:monospace;font-size:11px;">—</span><br>
+          Offline Queue: <span id="offlineQueueCount" style="font-weight:600;color:var(--red);">0 items</span>
+        </div>
+        <div style="padding:0 14px 14px;">
+          <button class="btn btn-primary btn-full btn-sm" id="syncNowBtn">
+            🔄 Sync Offline Queue Now
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /app-content -->
+
+  <!-- Bottom Tab Nav -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="qr">
+      <span class="ti">📷</span>QR Scan
+    </button>
+    <button class="tab-btn" data-tab="ocr">
+      <span class="ti">🔍</span>OCR Scan
+    </button>
+    <button class="tab-btn" data-tab="manual">
+      <span class="ti">✍️</span>Manual
+    </button>
+    <button class="tab-btn" data-tab="settings">
+      <span class="ti">⚙️</span>Settings
+    </button>
+  </nav>
+
+</div><!-- /appScreen -->
+
+<script src="app.js"></script>
+</body>
+</html>
