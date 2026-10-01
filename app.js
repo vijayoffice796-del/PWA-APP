@@ -12,10 +12,16 @@ let presenceRef = null;
 let pcOnline    = false;
 let fbReady     = false;
 
-// ── Config (loaded from localStorage) ────────────────────────────
-let FB_URL     = '';
-let FB_APIKEY  = '';
-let FB_PREFIX  = '/automation'; // static path prefix — matches Extension
+// ── Hardcoded Firebase defaults (no manual entry needed) ─────────
+const FB_DEFAULTS = {
+  url   : 'https://court-automation-2-default-rtdb.firebaseio.com/',
+  apiKey: 'AIzaSyBrgmFp4EXnO7Bb358fZdydk5HpI1UGS3o',
+};
+
+// ── Config (loaded from localStorage, falls back to defaults) ────
+let FB_URL     = FB_DEFAULTS.url;
+let FB_APIKEY  = FB_DEFAULTS.apiKey;
+let FB_PREFIX  = '/automation';
 
 // ── Static Firebase paths (same as Extension's background.js) ────
 const FB_PATH = () => ({
@@ -31,7 +37,9 @@ let scannerRunning  = false;
 let continuousMode  = false;
 let lastCode        = '';
 let lastScanTime    = 0;
-const SCAN_DEBOUNCE = 2500; // ms
+const SCAN_DEBOUNCE = 3000;  // ms — same code cooldown
+let   scanLocked    = false; // Global lock: blocks ALL scans for LOCK_MS after any success
+const SCAN_LOCK_MS  = 1500;  // ms — pause after ANY successful scan (prevents batch duplicates)
 
 // Step 6: selected tag from PWA UI
 let selectedTag = '';
@@ -182,14 +190,24 @@ async function stopCamera() {
 
 function onQRSuccess(text, result) {
   const now = Date.now();
+
+  // Duplicate fix 1: global lock — blocks ALL codes for LOCK_MS after any scan
+  if (scanLocked) return;
+
+  // Duplicate fix 2: same-code cooldown
   if (text === lastCode && (now - lastScanTime) < SCAN_DEBOUNCE) return;
+
+  // Acquire lock immediately — prevents other QR codes visible in frame
+  scanLocked = true;
+  setTimeout(() => { scanLocked = false; }, SCAN_LOCK_MS);
+
   lastCode = text; lastScanTime = now;
   scanCount++; $('scanCountDisplay').textContent = scanCount;
 
   displayQRResult(text, result);
   playBeep();
 
-  // Dispatch event — Step 6 will wire Firebase send here
+  // Dispatch event → Firebase send (Step 6)
   document.dispatchEvent(new CustomEvent('qr:scanned', {
     detail: { raw:text, format: result?.result?.format?.formatName || 'QR_CODE', timestamp:now }
   }));
@@ -544,10 +562,13 @@ document.addEventListener('visibilitychange', () => {
 async function boot() {
   showLoading('Loading…');
 
-  // Load saved config
-  FB_URL    = localStorage.getItem('ca_fb_url')    || 'https://court-automation-2-default-rtdb.firebaseio.com/';
-  FB_APIKEY = localStorage.getItem('ca_fb_apikey') || 'AIzaSyBrgmFp4EXnO7Bb358fZdydk5HpI1UGS3o';
+  // Load saved config — fall back to hardcoded defaults
+  FB_URL    = localStorage.getItem('ca_fb_url')    || FB_DEFAULTS.url;
+  FB_APIKEY = localStorage.getItem('ca_fb_apikey') || FB_DEFAULTS.apiKey;
   FB_PREFIX = localStorage.getItem('ca_fb_prefix') || '/automation';
+  // Save defaults to localStorage so settings UI shows them
+  if (!localStorage.getItem('ca_fb_url'))    localStorage.setItem('ca_fb_url',    FB_URL);
+  if (!localStorage.getItem('ca_fb_apikey')) localStorage.setItem('ca_fb_apikey', FB_APIKEY);
 
   // Pre-fill settings inputs
   if (FB_URL)    $('cfgUrl').value    = FB_URL;
