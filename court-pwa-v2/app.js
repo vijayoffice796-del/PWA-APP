@@ -114,31 +114,21 @@ function updateTagList() {
   $('activeTagLabel').textContent = cur || '—';
 }
 
-// Wire radio buttons — save selection, PRESERVE existing tag
+// Wire radio buttons
 document.querySelectorAll('input[name="caseType"]').forEach(radio => {
   radio.addEventListener('change', () => {
-    const prevTag = $('fileTag').value; // save before rebuild
-    localStorage.setItem('ca_case_type', radio.value);
     updateTagList();
-    // Always restore the previous tag — don't clear on type change
-    if (prevTag) {
-      $('fileTag').value = prevTag;
-      $('activeTagLabel').textContent = prevTag;
-      localStorage.setItem('ca_last_tag', prevTag);
-    }
+    $('fileTag').value = ''; // clear selected tag when case type changes
+    $('activeTagLabel').textContent = '—';
   });
 });
 
-// Update active tag label + save to localStorage on every change
+// Update active tag label when user picks from datalist
 $('fileTag').addEventListener('change', () => {
-  const val = $('fileTag').value;
-  $('activeTagLabel').textContent = val || '—';
-  localStorage.setItem('ca_last_tag', val);
+  $('activeTagLabel').textContent = $('fileTag').value || '—';
 });
 $('fileTag').addEventListener('input', () => {
-  const val = $('fileTag').value;
-  $('activeTagLabel').textContent = val || '—';
-  localStorage.setItem('ca_last_tag', val);
+  $('activeTagLabel').textContent = $('fileTag').value || '—';
 });
 
 // ================================================================
@@ -338,21 +328,11 @@ $('manualSendBtn').addEventListener('click', () => {
   if (!cnr) { toast('⚠️ CNR खाली है!', 'warn'); return; }
   sendToPC(cnr, tag);
   $('manualInput').value = '';
-  localStorage.removeItem('ca_manual_cnr'); // clear after successful send
   $('manualOk').textContent = `✅ "${cnr}" send किया गया`;
   $('manualOk').classList.add('show');
   setTimeout(() => $('manualOk').classList.remove('show'), 3000);
 });
-$('manualClearBtn').addEventListener('click', () => {
-  $('manualInput').value = '';
-  localStorage.removeItem('ca_manual_cnr');
-});
-$('manualInput').addEventListener('input', () => {
-  // Persist as user types — survives app reload
-  const val = $('manualInput').value;
-  if (val) localStorage.setItem('ca_manual_cnr', val);
-  else     localStorage.removeItem('ca_manual_cnr');
-});
+$('manualClearBtn').addEventListener('click', () => { $('manualInput').value = ''; });
 $('manualInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') $('manualSendBtn').click();
 });
@@ -605,26 +585,8 @@ async function boot() {
     }
   } catch(_) {}
 
-  // Restore last selected case type and tag from localStorage
-  const savedCaseType = localStorage.getItem('ca_case_type') || 'manual';
-  const savedTag      = localStorage.getItem('ca_last_tag')  || '';
-
-  // Set the correct radio button
-  const radio = document.querySelector(`input[name="caseType"][value="${savedCaseType}"]`);
-  if (radio) radio.checked = true;
-
-  // Build datalist for saved case type, then restore tag
+  // Init tag datalist on load
   updateTagList();
-  if (savedTag) {
-    $('fileTag').value = savedTag;
-    $('activeTagLabel').textContent = savedTag;
-  }
-
-  // Fix 1: restore manual CNR input if user had typed it
-  const savedManualCNR = localStorage.getItem('ca_manual_cnr') || '';
-  if (savedManualCNR && $('manualInput')) {
-    $('manualInput').value = savedManualCNR;
-  }
 
   hideLoading();
 }
