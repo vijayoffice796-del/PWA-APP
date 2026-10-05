@@ -20,6 +20,9 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <!-- Tesseract.js -->
   <script src="https://unpkg.com/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+  <!-- Cropper.js -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -290,6 +293,67 @@
     .info-blue   { background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; }
     .info-orange { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; }
 
+    /* ── INLINE CODE TAG ── */
+    code { font-family:monospace; background:var(--slate-100); padding:1px 5px;
+      border-radius:4px; font-size:11px; color:var(--indigo-dk); }
+
+    /* ── LOCAL QUEUE COUNTER ── */
+    .local-queue-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      background:#fff; border:1.5px solid var(--slate-200); border-radius:10px;
+      padding:10px 14px; margin-bottom:12px;
+    }
+    .lq-left  { display:flex; align-items:center; gap:8px; }
+    .lq-icon  { font-size:20px; }
+    .lq-label { font-size:12px; font-weight:600; color:var(--slate-700); }
+    .lq-count { font-size:20px; font-weight:800; color:var(--indigo); min-width:24px; }
+    .lq-sub   { font-size:10px; color:var(--slate-400); }
+    .lq-sub.paired { color:var(--green); font-weight:600; }
+    .lq-sub.unpaired { color:var(--orange); font-weight:600; }
+
+    /* ── CROP MODAL ── */
+    .crop-modal-overlay {
+      display:none; position:fixed; inset:0; background:rgba(0,0,0,.85);
+      z-index:9990; flex-direction:column; align-items:center; justify-content:center;
+      padding:16px;
+    }
+    .crop-modal-overlay.show { display:flex; }
+    .crop-modal {
+      background:#1e293b; border-radius:16px; width:100%; max-width:480px;
+      overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6);
+      display:flex; flex-direction:column; max-height:90vh;
+    }
+    .crop-modal-header {
+      padding:12px 16px; background:#0f172a;
+      display:flex; align-items:center; justify-content:space-between;
+      border-bottom:1px solid rgba(255,255,255,.1);
+    }
+    .crop-modal-title { color:#fff; font-size:14px; font-weight:700; }
+    .crop-modal-hint  { color:#94a3b8; font-size:11px; margin-top:2px; }
+    .crop-img-wrap {
+      flex:1; overflow:hidden; background:#0f172a;
+      display:flex; align-items:center; justify-content:center;
+      min-height:260px; max-height:55vh;
+    }
+    .crop-img-wrap img { max-width:100%; max-height:100%; display:block; }
+    .crop-modal-actions {
+      padding:14px 16px; display:flex; gap:10px;
+      border-top:1px solid rgba(255,255,255,.1);
+    }
+
+    /* OCR tab upload button row */
+    .ocr-source-row {
+      display:flex; gap:10px; margin-bottom:12px;
+    }
+    .ocr-upload-label {
+      flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+      padding:11px 14px; border-radius:10px; font-size:13px; font-weight:700;
+      background:var(--indigo); color:#fff; cursor:pointer; transition:all .15s;
+      border:none; font-family:inherit; text-align:center;
+    }
+    .ocr-upload-label:active { transform:scale(.97); background:var(--indigo-dk); }
+    .ocr-upload-label input  { display:none; }
+
     /* ── SETTINGS ── */
     .settings-card   { background:#fff; border:1px solid var(--slate-200); border-radius:12px; overflow:hidden; margin-bottom:12px; }
     .settings-hdr    { padding:10px 14px; background:var(--slate-50); border-bottom:1px solid var(--slate-200); font-size:12px; font-weight:700; color:var(--slate-700); }
@@ -382,6 +446,27 @@
         </div>
       </div>
 
+      <!-- Local Pending Queue Counter (Req 3 & 4 & 6) -->
+      <div class="local-queue-bar">
+        <div class="lq-left">
+          <span class="lq-icon">📋</span>
+          <div>
+            <div class="lq-label">Items waiting to send</div>
+            <div class="lq-sub" id="sessionStatusLabel">⚪ Not paired — scan PC's QR</div>
+          </div>
+        </div>
+        <div class="lq-count" id="localQueueCount">0</div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-green btn-half" id="syncToPCBtn">
+          📤 Sync to PC
+        </button>
+        <button class="btn btn-red-soft btn-half" id="clearLocalQueueBtn">
+          🗑️ Clear Queue
+        </button>
+      </div>
+
       <!-- Continuous Scan toggle -->
       <label class="check-row" id="contScanRow" for="continuousScan">
         <input type="checkbox" id="continuousScan"/>
@@ -417,13 +502,34 @@
         <div class="res-meta"  id="qrResultMeta"></div>
       </div>
 
-      <!-- ── MANUAL CNR ENTRY (merged from manual tab) ── -->
+      <!-- ── MANUAL CNR / CASE NUMBER ENTRY ── -->
       <div class="card" style="margin-top:4px;">
-        <div class="card-title">✍️ Manual CNR Entry</div>
+        <div class="card-title">✍️ Manual Entry</div>
+
+        <!-- searchType radio: CNR / Case Number -->
+        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:center;">
+          <span style="font-size:11px;font-weight:600;color:var(--slate-500);">Search By:</span>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;">
+            <input type="radio" name="searchType" id="stCNR" value="cnr" checked
+              style="accent-color:var(--indigo);width:15px;height:15px;"/>
+            CNR Number
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;">
+            <input type="radio" name="searchType" id="stCase" value="case_number"
+              style="accent-color:var(--orange);width:15px;height:15px;"/>
+            Case Number
+          </label>
+        </div>
+
+        <!-- dynamic placeholder updates with searchType -->
         <input class="manual-input" type="text" id="manualInput"
-          placeholder="CNR Number यहाँ लिखें…"
+          placeholder="CNR Number यहाँ लिखें… (comma से multiple)"
           autocomplete="off" autocorrect="off"
           autocapitalize="characters" spellcheck="false"/>
+        <div style="font-size:10px;color:var(--slate-400);margin-bottom:8px;margin-top:-4px;">
+          Multiple entries: comma से अलग करें — e.g. <code>UPBL01..., UPBL02...</code><br>
+          Case Number format: <code>Number/Year</code> — e.g. <code>123/2026, 45/2025</code>
+        </div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-primary btn-half" id="manualSendBtn">📤 Send to PC</button>
           <button class="btn btn-dark btn-half"    id="manualClearBtn">🗑️ Clear</button>
@@ -442,20 +548,31 @@
          TAB 2: OCR SCAN
     ══════════════════════════════════ -->
     <div class="tab-panel" id="tab-ocr">
-      <label class="ocr-drop" for="ocrInput" id="ocrDrop">
-        <input type="file" id="ocrInput" accept="image/*" capture="environment"/>
-        <div style="font-size:40px;margin-bottom:8px;">📸</div>
-        <div style="font-size:13px;font-weight:600;color:var(--slate-600);">फ़ोटो खींचें या Gallery से चुनें</div>
-        <div style="font-size:11px;color:var(--slate-400);margin-top:3px;">Court order, CNR slip, कोई भी document</div>
-      </label>
 
-      <img class="ocr-preview" id="ocrPreview" alt="Preview"/>
+      <!-- Source buttons: Camera Capture + Upload -->
+      <div class="ocr-source-row">
+        <!-- Camera capture -->
+        <label class="ocr-upload-label" style="background:var(--slate-700);">
+          <input type="file" id="ocrCamInput" accept="image/*" capture="environment"/>
+          📷 Camera
+        </label>
+        <!-- File upload -->
+        <label class="ocr-upload-label">
+          <input type="file" id="ocrInput" accept="image/*"/>
+          🖼️ Upload Image
+        </label>
+      </div>
 
+      <!-- Cropped/final preview (shown after crop) -->
+      <img class="ocr-preview" id="ocrPreview" alt="Cropped Preview"/>
+
+      <!-- OCR progress bar -->
       <div class="ocr-prog" id="ocrProg">
         <div class="prog-bar-wrap"><div class="prog-bar" id="ocrBar"></div></div>
         <div class="prog-label" id="ocrProgLabel">Initializing OCR…</div>
       </div>
 
+      <!-- OCR result card -->
       <div class="card" id="ocrResultCard" style="display:none;">
         <div class="card-title">📄 Extracted Text</div>
         <div class="ocr-result show" id="ocrResultBox"></div>
@@ -467,9 +584,31 @@
 
       <div class="info info-orange">
         ⚠️ OCR पहली बार Tesseract model download करेगा (~20MB)।<br>
-        साफ रोशनी में लिया गया फोटो बेहतर result देगा।
+        Image upload/capture करें → Crop करें → Scan होगा।
       </div>
     </div><!-- /tab-ocr -->
+
+    <!-- ══════════════════════════════════
+         CROP MODAL (global — outside tabs)
+    ══════════════════════════════════ -->
+    <div class="crop-modal-overlay" id="cropModalOverlay">
+      <div class="crop-modal">
+        <div class="crop-modal-header">
+          <div>
+            <div class="crop-modal-title">✂️ Crop Image</div>
+            <div class="crop-modal-hint">Drag to adjust · Pinch to zoom · Then tap Crop &amp; Scan</div>
+          </div>
+        </div>
+        <!-- Cropper.js attaches to this img -->
+        <div class="crop-img-wrap">
+          <img id="cropperImg" src="" alt="Crop"/>
+        </div>
+        <div class="crop-modal-actions">
+          <button class="btn btn-dark btn-half" id="cropCancelBtn">✕ Cancel</button>
+          <button class="btn btn-green btn-half" id="cropScanBtn">✂️ Crop &amp; Scan</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ══════════════════════════════════
          TAB 3: SETTINGS

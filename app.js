@@ -42,8 +42,58 @@ const SCAN_DEBOUNCE = 3000;
 let   scanLocked    = false;
 const SCAN_LOCK_MS  = 1500;
 
+// Offline-first local queue + pairing session
+let localPendingQueue = [];
+let activeSession     = null;
+const LPQ_KEY     = 'pwa_local_pending_queue';
+const SESSION_KEY = 'pwa_active_session';
+
 // ── DOM ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
+
+// ================================================================
+//  LOCAL QUEUE HELPERS
+// ================================================================
+function lqLoad() {
+  try { const raw = localStorage.getItem(LPQ_KEY); localPendingQueue = raw ? JSON.parse(raw) : []; }
+  catch(_) { localPendingQueue = []; }
+  updateQueueCounter();
+}
+function lqSave() {
+  try { localStorage.setItem(LPQ_KEY, JSON.stringify(localPendingQueue)); } catch(_) {}
+  updateQueueCounter();
+}
+function lqAdd(item)  { localPendingQueue.push(item); lqSave(); }
+function lqClear()    { localPendingQueue = []; lqSave(); }
+function updateQueueCounter() {
+  const el = $('localQueueCount'); if (el) el.textContent = localPendingQueue.length;
+}
+function updateSessionStatus() {
+  const el = $('sessionStatusLabel'); if (!el) return;
+  if (activeSession) {
+    el.textContent = '🟢 Paired: ' + activeSession.slice(-8);
+    el.className   = 'lq-sub paired';
+  } else {
+    el.textContent = '⚪ Not paired — scan PC QR';
+    el.className   = 'lq-sub unpaired';
+  }
+}
+function loadSession() {
+  activeSession = localStorage.getItem(SESSION_KEY) || null;
+  updateSessionStatus();
+}
+function addToLocalQueue(cnr, tag, searchType) {
+  const item = {
+    cnr          : cnr.trim().toUpperCase(),
+    tag          : tag || '',
+    searchType   : searchType || 'cnr',
+    timestamp    : Date.now(),
+    formattedTime: new Date().toLocaleString('en-IN', { timeZone:'Asia/Kolkata', hour12:true }),
+    status:'pending', source:'pwa',
+  };
+  lqAdd(item);
+  toast('Queued: ' + item.cnr + ' (' + localPendingQueue.length + ' total)', 'ok', 2000);
+}
 
 // ================================================================
 //  TAG ARRAYS
@@ -285,20 +335,26 @@ function onQRSuccess(text, result) {
   const now = Date.now();
   if (scanLocked) return;
   if (text === lastCode && (now - lastScanTime) < SCAN_DEBOUNCE) return;
-
   scanLocked = true;
   setTimeout(() => { scanLocked = false; }, SCAN_LOCK_MS);
-
   lastCode = text; lastScanTime = now;
-  scanCount++; $('scanCountDisplay').textContent = scanCount;
-
-  displayQRResult(text, result);
   playBeep();
-
-  // Read tag from fileTag input
-  const tag = $('fileTag').value.trim();
-  sendToPC(text, tag);
-
+  // Intercept pairing QR — do NOT add to queue
+  if (text.startsWith('court_session_')) {
+    activeSession = text;
+    localStorage.setItem(SESSION_KEY, text);
+    updateSessionStatus();
+    displayQRResult('Paired: ' + text, result);
+    toast('PC se pair ho gaya: ' + text.slice(-8), 'ok', 4000);
+    if (!continuousMode) stopCamera();
+    return; // Do NOT add to queue
+  }
+  // Normal scan → local queue
+  scanCount++; $('scanCountDisplay').textContent = scanCount;
+  displayQRResult(text, result);
+  const tag        = $('fileTag').value.trim();
+  const searchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
+  addToLocalQueue(text, tag, searchType);
   if (!continuousMode) stopCamera();
 }
 
@@ -332,20 +388,81 @@ function playBeep() {
 // ================================================================
 //  MANUAL SEND (reads tag from fileTag — same as QR)
 // ================================================================
-$('manualSendBtn').addEventListener('click', () => {
-  const cnr = $('manualInput').value.trim();
-  const tag = $('fileTag').value.trim();
-  if (!cnr) { toast('⚠️ CNR खाली है!', 'warn'); return; }
-  sendToPC(cnr, tag);
+$('manualSendBtn').addEventListener('click', async () => {
+  const raw        = $('manualInput').value.trim();
+  const tag        = $('fileTag').value.trim();
+  const searchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
+
+  if (!raw) { toast('⚠️ Input खाली है!', 'warn'); return; }
+
+  // Split by comma, trim each, remove empty
+  const items = raw.split(',').map(s => s.trim()).filter(Boolean);
+
+  if (!items.length) { toast('⚠️ Valid input नहीं मिला।', 'warn'); return; }
+
+  // Validate Case Number format: Number/Year strictly
+  if (searchType === 'case_number') {
+    const caseNumPattern = /^\d+\/\d{4}$/;
+    const invalid = items.filter(i => !caseNumPattern.test(i));
+    if (invalid.length) {
+      toast(`❌ Invalid format: "${invalid[0]}" — use Number/Year (e.g. 123/2026)`, 'err', 4000);
+      return;
+    }
+  }
+
+  // Req 3: add to local queue
+  items.forEach(item => addToLocalQueue(item, tag, searchType));
+  const sent = items.length;
+
   $('manualInput').value = '';
-  localStorage.removeItem('ca_manual_cnr'); // clear after successful send
-  $('manualOk').textContent = `✅ "${cnr}" send किया गया`;
+  localStorage.removeItem('ca_manual_cnr');
+  const label = searchType === 'case_number' ? 'Case Number' : 'CNR';
+  $('manualOk').textContent = `✅ ${sent} ${label}(s) queued`;
   $('manualOk').classList.add('show');
   setTimeout(() => $('manualOk').classList.remove('show'), 3000);
 });
 $('manualClearBtn').addEventListener('click', () => {
   $('manualInput').value = '';
   localStorage.removeItem('ca_manual_cnr');
+});
+
+// Req 4: Clear local queue
+$('clearLocalQueueBtn').addEventListener('click', () => {
+  if (!localPendingQueue.length) { toast('Queue empty.', 'warn'); return; }
+  if (!confirm(localPendingQueue.length + ' items clear karein?')) return;
+  lqClear();
+  toast('Queue cleared.', 'warn', 2500);
+});
+
+// Req 6: Sync to PC
+$('syncToPCBtn').addEventListener('click', async () => {
+  if (!activeSession) { toast('Pehle PC ka QR scan karein!', 'err', 4000); return; }
+  if (!localPendingQueue.length) { toast('Queue empty.', 'warn', 3000); return; }
+  if (!fbReady || !db) { toast('Firebase connect nahi hai.', 'err', 4000); return; }
+  if (!navigator.onLine) { toast('Internet nahi hai.', 'warn', 3000); return; }
+  const btn = $('syncToPCBtn');
+  btn.disabled = true; btn.textContent = 'Syncing...';
+  try {
+    const ref = db.ref('/queues/' + activeSession);
+    const toSend = [...localPendingQueue];
+    for (const item of toSend) { await ref.push(item); }
+    lqClear();
+    toast(toSend.length + ' items PC ko bheje gaye!', 'ok', 3500);
+  } catch(err) {
+    toast('Sync failed: ' + err.message, 'err', 4000);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sync to PC';
+  }
+});
+
+// Update placeholder when searchType changes
+document.querySelectorAll('input[name="searchType"]').forEach(r => {
+  r.addEventListener('change', () => {
+    const isCN = r.value === 'case_number';
+    $('manualInput').placeholder = isCN
+      ? 'Case Number: 123/2026, 45/2025…'
+      : 'CNR Number: UPBL01..., UPBL02… (comma se multiple)';
+  });
 });
 $('manualInput').addEventListener('input', () => {
   // Persist as user types — survives app reload
@@ -358,19 +475,103 @@ $('manualInput').addEventListener('keydown', e => {
 });
 
 // ================================================================
-//  OCR  (UNCHANGED)
+//  OCR + CROPPER.JS WORKFLOW
+//  Flow: image selected/captured → Crop Modal → Crop & Scan
+//        → runOCR(dataUrl) → regex → addToLocalQueue()
 // ================================================================
-let ocrWorker = null;
+let ocrWorker  = null;
+let cropperInst = null; // active Cropper.js instance
 
-$('ocrInput').addEventListener('change', async e => {
-  const file = e.target.files[0]; if (!file) return;
-  $('ocrPreview').src = URL.createObjectURL(file);
-  $('ocrPreview').classList.add('show');
+// ── Helper: open crop modal with a File or dataURL ────────────────
+function openCropModal(src) {
+  const img = $('cropperImg');
+  img.src = src;
+  $('cropModalOverlay').classList.add('show');
+
+  // Destroy any previous cropper instance
+  if (cropperInst) { cropperInst.destroy(); cropperInst = null; }
+
+  // Wait for img to load before initialising Cropper
+  img.onload = () => {
+    cropperInst = new Cropper(img, {
+      viewMode   : 1,       // restrict crop box inside canvas
+      dragMode   : 'move',  // drag the image, not the box
+      autoCropArea: 0.85,   // default crop = 85% of image
+      movable    : true,
+      zoomable   : true,
+      scalable   : false,
+      responsive : true,
+      background : false,
+      guides     : true,
+    });
+  };
+}
+
+function closeCropModal() {
+  if (cropperInst) { cropperInst.destroy(); cropperInst = null; }
+  $('cropModalOverlay').classList.remove('show');
+}
+
+// ── Wire both file inputs → open crop modal ───────────────────────
+function onImageSelected(file) {
+  if (!file) return;
   $('ocrResultCard').style.display = 'none';
-  await runOCR(file);
+  $('ocrPreview').classList.remove('show');
+  const reader = new FileReader();
+  reader.onload = e => openCropModal(e.target.result);
+  reader.readAsDataURL(file);
+}
+
+$('ocrInput').addEventListener('change', e => {
+  onImageSelected(e.target.files[0]);
+  e.target.value = ''; // reset so same file can be reselected
 });
 
-async function runOCR(file) {
+$('ocrCamInput').addEventListener('change', e => {
+  onImageSelected(e.target.files[0]);
+  e.target.value = '';
+});
+
+// ── Cancel: close modal, reset inputs ────────────────────────────
+$('cropCancelBtn').addEventListener('click', () => {
+  closeCropModal();
+  toast('Crop cancelled.', 'warn', 1500);
+});
+
+// ── Crop & Scan: extract cropped canvas → pass to Tesseract ───────
+$('cropScanBtn').addEventListener('click', () => {
+  if (!cropperInst) return;
+  $('cropScanBtn').disabled    = true;
+  $('cropScanBtn').textContent = '⏳ Processing…';
+  try {
+    // getCroppedCanvas returns a <canvas> — convert to dataURL
+    const canvas   = cropperInst.getCroppedCanvas({
+      maxWidth : 2048,
+      maxHeight: 2048,
+      imageSmoothingEnabled: true,
+      imageSmoothingQuality: 'high',
+    });
+    const dataUrl  = canvas.toDataURL('image/jpeg', 0.92);
+
+    // Show the cropped image as preview
+    $('ocrPreview').src = dataUrl;
+    $('ocrPreview').classList.add('show');
+
+    closeCropModal();
+
+    // Pass cropped dataUrl directly into existing Tesseract OCR function
+    runOCR(dataUrl);
+  } catch(err) {
+    toast('Crop error: ' + err.message, 'err', 3000);
+  } finally {
+    $('cropScanBtn').disabled    = false;
+    $('cropScanBtn').textContent = '✂️ Crop & Scan';
+  }
+});
+
+// ── runOCR: accepts File OR dataURL string ────────────────────────
+// All OCR extraction + addToLocalQueue logic UNCHANGED below
+async function runOCR(source) {
   $('ocrProg').classList.add('show'); $('ocrBar').style.width = '0%';
   $('ocrProgLabel').textContent = 'Tesseract.js शुरू हो रहा है…';
   try {
@@ -378,47 +579,70 @@ async function runOCR(file) {
       ocrWorker = await Tesseract.createWorker('eng', 1, {
         logger: m => {
           if (m.status === 'recognizing text') {
-            $('ocrBar').style.width = `${Math.round(m.progress*100)}%`;
-            $('ocrProgLabel').textContent = `Recognizing… ${Math.round(m.progress*100)}%`;
+            $('ocrBar').style.width = Math.round(m.progress * 100) + '%';
+            $('ocrProgLabel').textContent = 'Recognizing… ' + Math.round(m.progress * 100) + '%';
           } else if (m.status === 'loading tesseract core') {
             $('ocrProgLabel').textContent = 'Core load हो रहा है…';
           } else if (m.status === 'loading language traineddata') {
             $('ocrProgLabel').textContent = 'Language data load हो रहा है…';
           }
-        }
+        },
       });
     }
-    $('ocrProgLabel').textContent = 'Text पहचाना जा रहा है…'; $('ocrBar').style.width = '30%';
-    const { data: { text, confidence } } = await ocrWorker.recognize(file);
+    $('ocrProgLabel').textContent = 'Text पहचाना जा रहा है…';
+    $('ocrBar').style.width = '30%';
+
+    // Tesseract accepts File, Blob, dataURL, or URL
+    const { data: { text, confidence } } = await ocrWorker.recognize(source);
+
     $('ocrBar').style.width = '100%';
-    $('ocrProgLabel').textContent = `✅ Done! Confidence: ${Math.round(confidence)}%`;
+    $('ocrProgLabel').textContent = 'Done! Confidence: ' + Math.round(confidence) + '%';
     const trimmed = text.trim() || '(कोई text नहीं मिला)';
     $('ocrResultBox').textContent    = trimmed;
     $('ocrResultCard').style.display = 'block';
     setTimeout(() => $('ocrProg').classList.remove('show'), 1500);
-    toast(`✅ OCR complete! Confidence: ${Math.round(confidence)}%`, 'ok', 3000);
-    // Auto-detect CNR and send
-    const match = text.match(/[A-Z]{2}[A-Z0-9]{2}\d{10}/);
-    if (match) {
-      const tag = $('fileTag').value.trim();
-      toast(`🔍 CNR मिला: ${match[0]} — भेजा जा रहा है…`, 'ok', 2500);
-      sendToPC(match[0], tag);
+    toast('OCR complete! Confidence: ' + Math.round(confidence) + '%', 'ok', 3000);
+
+    // ── Multi-CNR extraction (UNCHANGED logic) ────────────────────
+    const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
+    const foundCNRs = new Set();
+
+    // Logic 1: strict 16-digit UPBL CNRs
+    const strictMatches = cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || [];
+    strictMatches.forEach(m => foundCNRs.add(m));
+
+    // Logic 2: fallback 12-char → prepend UPBL
+    let remainder = cleaned;
+    foundCNRs.forEach(c => { remainder = remainder.replace(c, ''); });
+    const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
+    fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
+
+    if (foundCNRs.size > 0) {
+      console.log('[PWA] OCR CNRs found:', [...foundCNRs]);
+      const ocrTag = $('fileTag')?.value?.trim() || '';
+      for (const cnr of foundCNRs) { addToLocalQueue(cnr, ocrTag, 'cnr'); }
+      toast(foundCNRs.size + ' CNR local queue mein add hue!', 'ok', 3500);
+    } else {
+      console.log('[PWA] OCR: no CNR pattern found');
+      toast('OCR mein koi CNR pattern nahi mila.', 'warn', 3000);
     }
   } catch(err) {
-    $('ocrProgLabel').textContent = `❌ Error: ${err.message}`;
-    toast('❌ OCR failed.', 'err');
+    $('ocrProgLabel').textContent = 'Error: ' + err.message;
+    toast('OCR failed: ' + err.message, 'err');
     setTimeout(() => $('ocrProg').classList.remove('show'), 3000);
   }
 }
 
 $('ocrCopyBtn').addEventListener('click', () => {
   const t = $('ocrResultBox').textContent; if (!t) return;
-  navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
+  navigator.clipboard.writeText(t).then(() => toast('Copied!', 'ok', 2000));
 });
 $('ocrClearBtn').addEventListener('click', () => {
   $('ocrPreview').classList.remove('show');
   $('ocrResultCard').style.display = 'none';
-  $('ocrResultBox').textContent = ''; $('ocrInput').value = '';
+  $('ocrResultBox').textContent = '';
+  $('ocrInput').value = ''; $('ocrCamInput').value = '';
+  closeCropModal();
 });
 
 // ================================================================
@@ -462,15 +686,20 @@ $('saveCfgBtn').addEventListener('click', () => {
 // ================================================================
 //  sendToPC  (UNCHANGED — core Firebase logic)
 // ================================================================
-async function sendToPC(cnr, tag) {
-  if (!cnr?.trim()) { toast('⚠️ CNR खाली है।', 'warn'); return; }
+async function sendToPC(cnr, tag, searchType = 'cnr') {
+  if (!cnr?.trim()) { toast('⚠️ Input खाली है।', 'warn'); return; }
 
   const payload = {
-    cnr      : cnr.trim().toUpperCase(),
-    tag      : tag || '',
-    timestamp: Date.now(),
-    status   : 'pending',
-    source   : 'pwa',
+    cnr          : cnr.trim().toUpperCase(),
+    tag          : tag || '',
+    searchType   : searchType || 'cnr',   // 'cnr' or 'case_number'
+    timestamp    : Date.now(),
+    formattedTime: new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour12  : true,
+    }),
+    status       : 'pending',
+    source       : 'pwa',
   };
 
   if (!fbReady || !db) {
@@ -625,6 +854,9 @@ async function boot() {
   if (savedManualCNR && $('manualInput')) {
     $('manualInput').value = savedManualCNR;
   }
+
+  lqLoad();
+  loadSession();
 
   hideLoading();
 }
