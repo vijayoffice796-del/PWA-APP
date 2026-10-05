@@ -42,8 +42,58 @@ const SCAN_DEBOUNCE = 3000;
 let   scanLocked    = false;
 const SCAN_LOCK_MS  = 1500;
 
+// Offline-first local queue + pairing session
+let localPendingQueue = [];
+let activeSession     = null;
+const LPQ_KEY     = 'pwa_local_pending_queue';
+const SESSION_KEY = 'pwa_active_session';
+
 // ── DOM ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
+
+// ================================================================
+//  LOCAL QUEUE HELPERS
+// ================================================================
+function lqLoad() {
+  try { const raw = localStorage.getItem(LPQ_KEY); localPendingQueue = raw ? JSON.parse(raw) : []; }
+  catch(_) { localPendingQueue = []; }
+  updateQueueCounter();
+}
+function lqSave() {
+  try { localStorage.setItem(LPQ_KEY, JSON.stringify(localPendingQueue)); } catch(_) {}
+  updateQueueCounter();
+}
+function lqAdd(item)  { localPendingQueue.push(item); lqSave(); }
+function lqClear()    { localPendingQueue = []; lqSave(); }
+function updateQueueCounter() {
+  const el = $('localQueueCount'); if (el) el.textContent = localPendingQueue.length;
+}
+function updateSessionStatus() {
+  const el = $('sessionStatusLabel'); if (!el) return;
+  if (activeSession) {
+    el.textContent = '🟢 Paired: ' + activeSession.slice(-8);
+    el.className   = 'lq-sub paired';
+  } else {
+    el.textContent = '⚪ Not paired — scan PC QR';
+    el.className   = 'lq-sub unpaired';
+  }
+}
+function loadSession() {
+  activeSession = localStorage.getItem(SESSION_KEY) || null;
+  updateSessionStatus();
+}
+function addToLocalQueue(cnr, tag, searchType) {
+  const item = {
+    cnr          : cnr.trim().toUpperCase(),
+    tag          : tag || '',
+    searchType   : searchType || 'cnr',
+    timestamp    : Date.now(),
+    formattedTime: new Date().toLocaleString('en-IN', { timeZone:'Asia/Kolkata', hour12:true }),
+    status:'pending', source:'pwa',
+  };
+  lqAdd(item);
+  toast('Queued: ' + item.cnr + ' (' + localPendingQueue.length + ' total)', 'ok', 2000);
+}
 
 // ================================================================
 //  TAG ARRAYS
@@ -114,21 +164,31 @@ function updateTagList() {
   $('activeTagLabel').textContent = cur || '—';
 }
 
-// Wire radio buttons
+// Wire radio buttons — save selection, PRESERVE existing tag
 document.querySelectorAll('input[name="caseType"]').forEach(radio => {
   radio.addEventListener('change', () => {
+    const prevTag = $('fileTag').value; // save before rebuild
+    localStorage.setItem('ca_case_type', radio.value);
     updateTagList();
-    $('fileTag').value = ''; // clear selected tag when case type changes
-    $('activeTagLabel').textContent = '—';
+    // Always restore the previous tag — don't clear on type change
+    if (prevTag) {
+      $('fileTag').value = prevTag;
+      $('activeTagLabel').textContent = prevTag;
+      localStorage.setItem('ca_last_tag', prevTag);
+    }
   });
 });
 
-// Update active tag label when user picks from datalist
+// Update active tag label + save to localStorage on every change
 $('fileTag').addEventListener('change', () => {
-  $('activeTagLabel').textContent = $('fileTag').value || '—';
+  const val = $('fileTag').value;
+  $('activeTagLabel').textContent = val || '—';
+  localStorage.setItem('ca_last_tag', val);
 });
 $('fileTag').addEventListener('input', () => {
-  $('activeTagLabel').textContent = $('fileTag').value || '—';
+  const val = $('fileTag').value;
+  $('activeTagLabel').textContent = val || '—';
+  localStorage.setItem('ca_last_tag', val);
 });
 
 // ================================================================
@@ -275,20 +335,26 @@ function onQRSuccess(text, result) {
   const now = Date.now();
   if (scanLocked) return;
   if (text === lastCode && (now - lastScanTime) < SCAN_DEBOUNCE) return;
-
   scanLocked = true;
   setTimeout(() => { scanLocked = false; }, SCAN_LOCK_MS);
-
   lastCode = text; lastScanTime = now;
-  scanCount++; $('scanCountDisplay').textContent = scanCount;
-
-  displayQRResult(text, result);
   playBeep();
-
-  // Read tag from fileTag input
-  const tag = $('fileTag').value.trim();
-  sendToPC(text, tag);
-
+  // Intercept pairing QR — do NOT add to queue
+  if (text.startsWith('court_session_')) {
+    activeSession = text;
+    localStorage.setItem(SESSION_KEY, text);
+    updateSessionStatus();
+    displayQRResult('Paired: ' + text, result);
+    toast('PC se pair ho gaya: ' + text.slice(-8), 'ok', 4000);
+    if (!continuousMode) stopCamera();
+    return; // Do NOT add to queue
+  }
+  // Normal scan → local queue
+  scanCount++; $('scanCountDisplay').textContent = scanCount;
+  displayQRResult(text, result);
+  const tag        = $('fileTag').value.trim();
+  const searchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
+  addToLocalQueue(text, tag, searchType);
   if (!continuousMode) stopCamera();
 }
 
@@ -322,17 +388,88 @@ function playBeep() {
 // ================================================================
 //  MANUAL SEND (reads tag from fileTag — same as QR)
 // ================================================================
-$('manualSendBtn').addEventListener('click', () => {
-  const cnr = $('manualInput').value.trim();
-  const tag = $('fileTag').value.trim();
-  if (!cnr) { toast('⚠️ CNR खाली है!', 'warn'); return; }
-  sendToPC(cnr, tag);
+$('manualSendBtn').addEventListener('click', async () => {
+  const raw        = $('manualInput').value.trim();
+  const tag        = $('fileTag').value.trim();
+  const searchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
+
+  if (!raw) { toast('⚠️ Input खाली है!', 'warn'); return; }
+
+  // Split by comma, trim each, remove empty
+  const items = raw.split(',').map(s => s.trim()).filter(Boolean);
+
+  if (!items.length) { toast('⚠️ Valid input नहीं मिला।', 'warn'); return; }
+
+  // Validate Case Number format: Number/Year strictly
+  if (searchType === 'case_number') {
+    const caseNumPattern = /^\d+\/\d{4}$/;
+    const invalid = items.filter(i => !caseNumPattern.test(i));
+    if (invalid.length) {
+      toast(`❌ Invalid format: "${invalid[0]}" — use Number/Year (e.g. 123/2026)`, 'err', 4000);
+      return;
+    }
+  }
+
+  // Req 3: add to local queue
+  items.forEach(item => addToLocalQueue(item, tag, searchType));
+  const sent = items.length;
+
   $('manualInput').value = '';
-  $('manualOk').textContent = `✅ "${cnr}" send किया गया`;
+  localStorage.removeItem('ca_manual_cnr');
+  const label = searchType === 'case_number' ? 'Case Number' : 'CNR';
+  $('manualOk').textContent = `✅ ${sent} ${label}(s) queued`;
   $('manualOk').classList.add('show');
   setTimeout(() => $('manualOk').classList.remove('show'), 3000);
 });
-$('manualClearBtn').addEventListener('click', () => { $('manualInput').value = ''; });
+$('manualClearBtn').addEventListener('click', () => {
+  $('manualInput').value = '';
+  localStorage.removeItem('ca_manual_cnr');
+});
+
+// Req 4: Clear local queue
+$('clearLocalQueueBtn').addEventListener('click', () => {
+  if (!localPendingQueue.length) { toast('Queue empty.', 'warn'); return; }
+  if (!confirm(localPendingQueue.length + ' items clear karein?')) return;
+  lqClear();
+  toast('Queue cleared.', 'warn', 2500);
+});
+
+// Req 6: Sync to PC
+$('syncToPCBtn').addEventListener('click', async () => {
+  if (!activeSession) { toast('Pehle PC ka QR scan karein!', 'err', 4000); return; }
+  if (!localPendingQueue.length) { toast('Queue empty.', 'warn', 3000); return; }
+  if (!fbReady || !db) { toast('Firebase connect nahi hai.', 'err', 4000); return; }
+  if (!navigator.onLine) { toast('Internet nahi hai.', 'warn', 3000); return; }
+  const btn = $('syncToPCBtn');
+  btn.disabled = true; btn.textContent = 'Syncing...';
+  try {
+    const ref = db.ref('/queues/' + activeSession);
+    const toSend = [...localPendingQueue];
+    for (const item of toSend) { await ref.push(item); }
+    lqClear();
+    toast(toSend.length + ' items PC ko bheje gaye!', 'ok', 3500);
+  } catch(err) {
+    toast('Sync failed: ' + err.message, 'err', 4000);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sync to PC';
+  }
+});
+
+// Update placeholder when searchType changes
+document.querySelectorAll('input[name="searchType"]').forEach(r => {
+  r.addEventListener('change', () => {
+    const isCN = r.value === 'case_number';
+    $('manualInput').placeholder = isCN
+      ? 'Case Number: 123/2026, 45/2025…'
+      : 'CNR Number: UPBL01..., UPBL02… (comma se multiple)';
+  });
+});
+$('manualInput').addEventListener('input', () => {
+  // Persist as user types — survives app reload
+  const val = $('manualInput').value;
+  if (val) localStorage.setItem('ca_manual_cnr', val);
+  else     localStorage.removeItem('ca_manual_cnr');
+});
 $('manualInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') $('manualSendBtn').click();
 });
@@ -377,12 +514,34 @@ async function runOCR(file) {
     $('ocrResultCard').style.display = 'block';
     setTimeout(() => $('ocrProg').classList.remove('show'), 1500);
     toast(`✅ OCR complete! Confidence: ${Math.round(confidence)}%`, 'ok', 3000);
-    // Auto-detect CNR and send
-    const match = text.match(/[A-Z]{2}[A-Z0-9]{2}\d{10}/);
-    if (match) {
-      const tag = $('fileTag').value.trim();
-      toast(`🔍 CNR मिला: ${match[0]} — भेजा जा रहा है…`, 'ok', 2500);
-      sendToPC(match[0], tag);
+
+    // OCR Multi-CNR extraction logic
+    // Step 1: clean — remove spaces/hyphens, uppercase
+    const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
+
+    const foundCNRs = new Set(); // deduplicate
+
+    // Logic 1 (global): find ALL strict 16-digit CNRs starting with 'UPBL'
+    const strictMatches = cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || [];
+    strictMatches.forEach(m => foundCNRs.add(m));
+
+    // Logic 2 (global fallback): find ALL 12-char suffixes not already covered
+    // Strip already-found full CNRs so they don't double-match
+    let remainder = cleaned;
+    foundCNRs.forEach(c => { remainder = remainder.replace(c, ''); });
+    const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
+    fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
+
+    const tag = $('fileTag')?.value?.trim() || '';
+
+    if (foundCNRs.size > 0) {
+      console.log('[PWA] OCR CNRs found:', [...foundCNRs]);
+      const ocrTag = $('fileTag')?.value?.trim() || '';
+      for (const cnr of foundCNRs) { addToLocalQueue(cnr, ocrTag, 'cnr'); }
+      toast(foundCNRs.size + ' CNR local queue mein add hue!', 'ok', 3500);
+    } else {
+      console.log('[PWA] OCR: no CNR pattern found');
+      toast('OCR mein koi CNR pattern nahi mila.', 'warn', 3000);
     }
   } catch(err) {
     $('ocrProgLabel').textContent = `❌ Error: ${err.message}`;
@@ -442,15 +601,20 @@ $('saveCfgBtn').addEventListener('click', () => {
 // ================================================================
 //  sendToPC  (UNCHANGED — core Firebase logic)
 // ================================================================
-async function sendToPC(cnr, tag) {
-  if (!cnr?.trim()) { toast('⚠️ CNR खाली है।', 'warn'); return; }
+async function sendToPC(cnr, tag, searchType = 'cnr') {
+  if (!cnr?.trim()) { toast('⚠️ Input खाली है।', 'warn'); return; }
 
   const payload = {
-    cnr      : cnr.trim().toUpperCase(),
-    tag      : tag || '',
-    timestamp: Date.now(),
-    status   : 'pending',
-    source   : 'pwa',
+    cnr          : cnr.trim().toUpperCase(),
+    tag          : tag || '',
+    searchType   : searchType || 'cnr',   // 'cnr' or 'case_number'
+    timestamp    : Date.now(),
+    formattedTime: new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour12  : true,
+    }),
+    status       : 'pending',
+    source       : 'pwa',
   };
 
   if (!fbReady || !db) {
@@ -585,8 +749,29 @@ async function boot() {
     }
   } catch(_) {}
 
-  // Init tag datalist on load
+  // Restore last selected case type and tag from localStorage
+  const savedCaseType = localStorage.getItem('ca_case_type') || 'manual';
+  const savedTag      = localStorage.getItem('ca_last_tag')  || '';
+
+  // Set the correct radio button
+  const radio = document.querySelector(`input[name="caseType"][value="${savedCaseType}"]`);
+  if (radio) radio.checked = true;
+
+  // Build datalist for saved case type, then restore tag
   updateTagList();
+  if (savedTag) {
+    $('fileTag').value = savedTag;
+    $('activeTagLabel').textContent = savedTag;
+  }
+
+  // Fix 1: restore manual CNR input if user had typed it
+  const savedManualCNR = localStorage.getItem('ca_manual_cnr') || '';
+  if (savedManualCNR && $('manualInput')) {
+    $('manualInput').value = savedManualCNR;
+  }
+
+  lqLoad();
+  loadSession();
 
   hideLoading();
 }

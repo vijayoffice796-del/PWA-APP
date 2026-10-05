@@ -9,6 +9,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <title>Court Automation</title>
   <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icons/icon180.png"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png"/>
+  <link rel="icon" type="image/png" sizes="64x64" href="icons/icon64.png"/>
 
   <!-- Firebase 8 compat CDN -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -287,6 +290,24 @@
     .info-blue   { background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; }
     .info-orange { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; }
 
+    /* ── INLINE CODE TAG ── */
+    code { font-family:monospace; background:var(--slate-100); padding:1px 5px;
+      border-radius:4px; font-size:11px; color:var(--indigo-dk); }
+
+    /* ── LOCAL QUEUE COUNTER ── */
+    .local-queue-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      background:#fff; border:1.5px solid var(--slate-200); border-radius:10px;
+      padding:10px 14px; margin-bottom:12px;
+    }
+    .lq-left  { display:flex; align-items:center; gap:8px; }
+    .lq-icon  { font-size:20px; }
+    .lq-label { font-size:12px; font-weight:600; color:var(--slate-700); }
+    .lq-count { font-size:20px; font-weight:800; color:var(--indigo); min-width:24px; }
+    .lq-sub   { font-size:10px; color:var(--slate-400); }
+    .lq-sub.paired { color:var(--green); font-weight:600; }
+    .lq-sub.unpaired { color:var(--orange); font-weight:600; }
+
     /* ── SETTINGS ── */
     .settings-card   { background:#fff; border:1px solid var(--slate-200); border-radius:12px; overflow:hidden; margin-bottom:12px; }
     .settings-hdr    { padding:10px 14px; background:var(--slate-50); border-bottom:1px solid var(--slate-200); font-size:12px; font-weight:700; color:var(--slate-700); }
@@ -379,6 +400,27 @@
         </div>
       </div>
 
+      <!-- Local Pending Queue Counter (Req 3 & 4 & 6) -->
+      <div class="local-queue-bar">
+        <div class="lq-left">
+          <span class="lq-icon">📋</span>
+          <div>
+            <div class="lq-label">Items waiting to send</div>
+            <div class="lq-sub" id="sessionStatusLabel">⚪ Not paired — scan PC's QR</div>
+          </div>
+        </div>
+        <div class="lq-count" id="localQueueCount">0</div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-green btn-half" id="syncToPCBtn">
+          📤 Sync to PC
+        </button>
+        <button class="btn btn-red-soft btn-half" id="clearLocalQueueBtn">
+          🗑️ Clear Queue
+        </button>
+      </div>
+
       <!-- Continuous Scan toggle -->
       <label class="check-row" id="contScanRow" for="continuousScan">
         <input type="checkbox" id="continuousScan"/>
@@ -414,13 +456,34 @@
         <div class="res-meta"  id="qrResultMeta"></div>
       </div>
 
-      <!-- ── MANUAL CNR ENTRY (merged from manual tab) ── -->
+      <!-- ── MANUAL CNR / CASE NUMBER ENTRY ── -->
       <div class="card" style="margin-top:4px;">
-        <div class="card-title">✍️ Manual CNR Entry</div>
+        <div class="card-title">✍️ Manual Entry</div>
+
+        <!-- searchType radio: CNR / Case Number -->
+        <div style="display:flex;gap:10px;margin-bottom:10px;align-items:center;">
+          <span style="font-size:11px;font-weight:600;color:var(--slate-500);">Search By:</span>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;">
+            <input type="radio" name="searchType" id="stCNR" value="cnr" checked
+              style="accent-color:var(--indigo);width:15px;height:15px;"/>
+            CNR Number
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;">
+            <input type="radio" name="searchType" id="stCase" value="case_number"
+              style="accent-color:var(--orange);width:15px;height:15px;"/>
+            Case Number
+          </label>
+        </div>
+
+        <!-- dynamic placeholder updates with searchType -->
         <input class="manual-input" type="text" id="manualInput"
-          placeholder="CNR Number यहाँ लिखें…"
+          placeholder="CNR Number यहाँ लिखें… (comma से multiple)"
           autocomplete="off" autocorrect="off"
           autocapitalize="characters" spellcheck="false"/>
+        <div style="font-size:10px;color:var(--slate-400);margin-bottom:8px;margin-top:-4px;">
+          Multiple entries: comma से अलग करें — e.g. <code>UPBL01..., UPBL02...</code><br>
+          Case Number format: <code>Number/Year</code> — e.g. <code>123/2026, 45/2025</code>
+        </div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-primary btn-half" id="manualSendBtn">📤 Send to PC</button>
           <button class="btn btn-dark btn-half"    id="manualClearBtn">🗑️ Clear</button>

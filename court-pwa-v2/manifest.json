@@ -1,14 +1,17 @@
 {
-  "name": "Court Automation PWA",
+  "name": "Court Automation",
   "short_name": "CourtScan",
   "description": "Mobile QR/OCR scanner for Court Automation Ecosystem",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#4f46e5",
+  "background_color": "#3730a3",
   "theme_color": "#4f46e5",
   "orientation": "portrait",
   "icons": [
-    { "src": "icons/icon192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icons/icon512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icons/favicon-32.png", "sizes": "32x32",   "type": "image/png" },
+    { "src": "icons/icon64.png",     "sizes": "64x64",   "type": "image/png" },
+    { "src": "icons/icon180.png",    "sizes": "180x180",  "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon192.png",    "sizes": "192x192",  "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon512.png",    "sizes": "512x512",  "type": "image/png", "purpose": "any maskable" }
   ]
 }
