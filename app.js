@@ -434,24 +434,52 @@ $('clearLocalQueueBtn').addEventListener('click', () => {
   toast('Queue cleared.', 'warn', 2500);
 });
 
-// Req 6: Sync to PC
+// Sync to PC — pushes localPendingQueue to Firebase session path
 $('syncToPCBtn').addEventListener('click', async () => {
-  if (!activeSession) { toast('Pehle PC ka QR scan karein!', 'err', 4000); return; }
-  if (!localPendingQueue.length) { toast('Queue empty.', 'warn', 3000); return; }
-  if (!fbReady || !db) { toast('Firebase connect nahi hai.', 'err', 4000); return; }
-  if (!navigator.onLine) { toast('Internet nahi hai.', 'warn', 3000); return; }
+  // Guard checks
+  if (!activeSession) {
+    toast('❌ Pehle PC ka Pairing QR scan karein!', 'err', 4000);
+    // Switch to QR tab so user can scan
+    document.querySelector('.tab-btn[data-tab="qr"]')?.click();
+    return;
+  }
+  if (!localPendingQueue.length) {
+    toast('⚠️ Queue mein koi item nahi hai.', 'warn', 3000); return;
+  }
+  if (!fbReady || !db) {
+    toast('❌ Firebase ready nahi hai. Settings check karein.', 'err', 4000); return;
+  }
+  if (!navigator.onLine) {
+    toast('📴 Internet nahi hai.', 'warn', 3000); return;
+  }
+
   const btn = $('syncToPCBtn');
-  btn.disabled = true; btn.textContent = 'Syncing...';
+  btn.disabled = true; btn.textContent = '⏳ Syncing...';
+
+  let sent = 0;
   try {
-    const ref = db.ref('/queues/' + activeSession);
-    const toSend = [...localPendingQueue];
-    for (const item of toSend) { await ref.push(item); }
+    const sessionRef = db.ref('/queues/' + activeSession);
+    // Send each item with IST timestamp added
+    for (const item of localPendingQueue) {
+      const enriched = {
+        ...item,
+        formattedTime: item.formattedTime || new Date().toLocaleString('en-IN',{
+          timeZone:'Asia/Kolkata', hour12:true,
+        }),
+        synced_at: Date.now(),
+      };
+      await sessionRef.push(enriched);
+      sent++;
+    }
     lqClear();
-    toast(toSend.length + ' items PC ko bheje gaye!', 'ok', 3500);
+    toast('✅ ' + sent + ' items PC ko bheje gaye!', 'ok', 3500);
+    console.log('[PWA] Synced', sent, 'items to /queues/' + activeSession);
   } catch(err) {
-    toast('Sync failed: ' + err.message, 'err', 4000);
+    // Items already pushed partially — don't clear queue
+    toast('❌ Sync failed (' + sent + '/' + localPendingQueue.length + '): ' + err.message, 'err', 5000);
+    console.error('[PWA] Sync error:', err.message);
   } finally {
-    btn.disabled = false; btn.textContent = 'Sync to PC';
+    btn.disabled = false; btn.textContent = '📤 Sync to PC';
   }
 });
 
