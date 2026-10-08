@@ -645,15 +645,25 @@ async function runOCR(source) {
     const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
     fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
 
-    // Auto-extraction removed — user reviews text then clicks "Send to Queue"
+        // Smart Highlight: find UP* words AND 10+ digit numbers
+    const HIGHLIGHT_RE = /\b(UP[a-zA-Z0-9]+|\d{10,})\b/gi;
+    const highlighted  = trimmed.replace(HIGHLIGHT_RE, function(match) {
+      const safe = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return '<span class="cnr-highlight" data-cnr="' + safe + '">' + safe + '</span>';
+    });
+    const hlBox = $('ocr-highlight-box');
+    if (hlBox) {
+      hlBox.innerHTML = highlighted ||
+        '<em style="color:#94a3b8">No highlighted terms found</em>';
+    }
+
     if (foundCNRs.size > 0) {
       console.log('[PWA] OCR CNRs auto-detected:', [...foundCNRs]);
-      toast(foundCNRs.size + ' CNR मिले — "Send to Queue" दबाएँ।', 'ok', 3500);
+      toast(foundCNRs.size + ' CNR मिले — tap करें या "Send to Queue" दबाएं।', 'ok', 3500);
     } else {
       console.log('[PWA] OCR: no CNR pattern found');
-      toast('OCR हो गया — text edit करें फिर "Send to Queue" दबाएँ।', 'warn', 3000);
-    }
-  } catch(err) {
+      toast('OCR हो गया — highlighted terms tap करें या edit करके Send करें।', 'warn', 3000);
+    }  } catch(err) {
     $('ocrProgLabel').textContent = 'Error: ' + err.message;
     toast('OCR failed: ' + err.message, 'err');
     setTimeout(() => $('ocrProg').classList.remove('show'), 3000);
@@ -663,6 +673,19 @@ async function runOCR(source) {
 $('ocrCopyBtn').addEventListener('click', () => {
   const t = $('ocrResultBox').value; if (!t) return;
   navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
+});
+
+// Tap-to-Extract: click highlighted span → fills textarea
+$('ocr-highlight-box').addEventListener('click', function(e) {
+  const span = e.target.closest('.cnr-highlight');
+  if (!span) return;
+  const extracted = span.dataset.cnr || span.textContent || '';
+  if (!extracted) return;
+  $('ocrResultBox').value = extracted;
+  $('ocrResultBox').focus();
+  span.classList.add('tapped');
+  setTimeout(function() { span.classList.remove('tapped'); }, 1200);
+  toast('📌 Extracted: ' + extracted, 'ok', 2000);
 });
 
 // New Feature 2: Send to Queue from OCR text
@@ -697,6 +720,8 @@ $('ocrClearBtn').addEventListener('click', () => {
   $('ocrPreview').classList.remove('show');
   $('ocrResultCard').style.display = 'none';
   $('ocrResultBox').value = '';
+  const hlBox = $('ocr-highlight-box');
+  if (hlBox) hlBox.innerHTML = '';
   $('ocrInput').value = ''; $('ocrCamInput').value = '';
   closeCropModal();
 });

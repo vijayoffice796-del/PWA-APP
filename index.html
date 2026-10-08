@@ -354,6 +354,32 @@
     .ocr-upload-label:active { transform:scale(.97); background:var(--indigo-dk); }
     .ocr-upload-label input  { display:none; }
 
+    /* ── CNR HIGHLIGHT (OCR Smart Highlight) ── */
+    #ocr-highlight-box {
+      border:1.5px solid var(--slate-200); border-radius:8px;
+      padding:10px 12px; min-height:60px; margin-bottom:8px;
+      background:#fff; font-size:13px; line-height:1.9;
+      color:var(--slate-700); word-break:break-all;
+    }
+    #ocr-highlight-box:empty::before {
+      content:'Highlighted terms यहाँ दिखेंगे — tap करें to extract';
+      color:var(--slate-400); font-size:12px; font-style:italic;
+    }
+    .cnr-highlight {
+      background-color:#fef08a;   /* yellow */
+      font-weight:bold;
+      cursor:pointer;
+      padding:2px 5px;
+      margin:1px 2px;
+      border-radius:4px;
+      border:1px solid #ca8a04;
+      transition:background-color .2s;
+      display:inline-block;
+      user-select:none;
+    }
+    .cnr-highlight:hover  { background-color:#fde047; border-color:#a16207; }
+    .cnr-highlight.tapped { background-color:#bbf7d0; border-color:#15803d; }
+
     /* ── SETTINGS ── */
     .settings-card   { background:#fff; border:1px solid var(--slate-200); border-radius:12px; overflow:hidden; margin-bottom:12px; }
     .settings-hdr    { padding:10px 14px; background:var(--slate-50); border-bottom:1px solid var(--slate-200); font-size:12px; font-weight:700; color:var(--slate-700); }
@@ -589,6 +615,9 @@
             (edit करें, फिर Send Queue करें)
           </span>
         </div>
+        <!-- Smart Highlight Box: tap a highlighted word to copy to textarea -->
+        <div id="ocr-highlight-box" contenteditable="false"></div>
+
         <!-- Editable textarea instead of read-only div -->
         <textarea id="ocrResultBox"
           style="width:100%;min-height:100px;max-height:200px;resize:vertical;
