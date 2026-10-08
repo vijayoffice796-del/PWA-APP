@@ -626,7 +626,7 @@ async function runOCR(source) {
     $('ocrBar').style.width = '100%';
     $('ocrProgLabel').textContent = 'Done! Confidence: ' + Math.round(confidence) + '%';
     const trimmed = text.trim() || '(कोई text नहीं मिला)';
-    $('ocrResultBox').textContent    = trimmed;
+    $('ocrResultBox').value          = trimmed; // textarea — editable
     $('ocrResultCard').style.display = 'block';
     setTimeout(() => $('ocrProg').classList.remove('show'), 1500);
     toast('OCR complete! Confidence: ' + Math.round(confidence) + '%', 'ok', 3000);
@@ -645,14 +645,13 @@ async function runOCR(source) {
     const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
     fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
 
+    // Auto-extraction removed — user reviews text then clicks "Send to Queue"
     if (foundCNRs.size > 0) {
-      console.log('[PWA] OCR CNRs found:', [...foundCNRs]);
-      const ocrTag = $('fileTag')?.value?.trim() || '';
-      for (const cnr of foundCNRs) { addToLocalQueue(cnr, ocrTag, 'cnr'); }
-      toast(foundCNRs.size + ' CNR local queue mein add hue!', 'ok', 3500);
+      console.log('[PWA] OCR CNRs auto-detected:', [...foundCNRs]);
+      toast(foundCNRs.size + ' CNR मिले — "Send to Queue" दबाएँ।', 'ok', 3500);
     } else {
       console.log('[PWA] OCR: no CNR pattern found');
-      toast('OCR mein koi CNR pattern nahi mila.', 'warn', 3000);
+      toast('OCR हो गया — text edit करें फिर "Send to Queue" दबाएँ।', 'warn', 3000);
     }
   } catch(err) {
     $('ocrProgLabel').textContent = 'Error: ' + err.message;
@@ -662,13 +661,42 @@ async function runOCR(source) {
 }
 
 $('ocrCopyBtn').addEventListener('click', () => {
-  const t = $('ocrResultBox').textContent; if (!t) return;
-  navigator.clipboard.writeText(t).then(() => toast('Copied!', 'ok', 2000));
+  const t = $('ocrResultBox').value; if (!t) return;
+  navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
+});
+
+// New Feature 2: Send to Queue from OCR text
+$('ocrSendQueueBtn').addEventListener('click', () => {
+  const text    = $('ocrResultBox').value.trim();
+  const ocrTag  = $('fileTag')?.value?.trim() || '';
+  if (!text) { toast('⚠️ Text box खाली है।', 'warn'); return; }
+
+  // Run same CNR extraction on the (possibly edited) text
+  const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
+  const found   = new Set();
+
+  // Logic 1: strict UPBL CNRs
+  (cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || []).forEach(m => found.add(m));
+
+  // Logic 2: fallback 12-char → prepend UPBL
+  let rem = cleaned;
+  found.forEach(c => { rem = rem.replace(c, ''); });
+  (rem.match(/[A-Z0-9]{2}\d{10}/g) || []).forEach(m => found.add('UPBL' + m));
+
+  if (!found.size) {
+    toast('❌ Text में कोई CNR pattern नहीं मिला।', 'err', 3000);
+    return;
+  }
+
+  for (const cnr of found) { addToLocalQueue(cnr, ocrTag, 'cnr'); }
+  toast('✅ ' + found.size + ' CNR queue में add हुए!', 'ok', 3000);
+  $('ocrResultBox').style.borderColor = 'var(--green)';
+  setTimeout(() => { $('ocrResultBox').style.borderColor = ''; }, 2000);
 });
 $('ocrClearBtn').addEventListener('click', () => {
   $('ocrPreview').classList.remove('show');
   $('ocrResultCard').style.display = 'none';
-  $('ocrResultBox').textContent = '';
+  $('ocrResultBox').value = '';
   $('ocrInput').value = ''; $('ocrCamInput').value = '';
   closeCropModal();
 });
@@ -799,12 +827,40 @@ function updateOfflineQueueBadge(count) {
 }
 
 window.addEventListener('online', () => {
-  toast('🌐 Internet मिला — offline queue sync हो रही है…', 'ok', 2000);
-  setTimeout(syncOfflineQueue, 1000);
+  toast('🌐 Internet मिला — sync शुरू हो रही है…', 'ok', 2000);
+  setTimeout(() => { syncOfflineQueue(); autoSyncLocalQueue(); }, 1200);
 });
 window.addEventListener('offline', () => {
   toast('📴 Internet नहीं है — Offline Mode।', 'warn', 4000);
 });
+
+// Fix 5: Auto-sync localPendingQueue when internet restored
+async function autoSyncLocalQueue() {
+  if (!activeSession)                { console.log('[PWA] autoSync: no session'); return; }
+  if (!fbReady || !db)               { console.log('[PWA] autoSync: Firebase not ready'); return; }
+  if (!localPendingQueue.length)     { console.log('[PWA] autoSync: queue empty'); return; }
+  if (!navigator.onLine)             { console.log('[PWA] autoSync: offline'); return; }
+  console.log('[PWA] autoSync:', localPendingQueue.length, 'items...');
+  const sessionRef = db.ref('/queues/' + activeSession);
+  const toSend = [...localPendingQueue];
+  let sent = 0;
+  try {
+    for (const item of toSend) {
+      await sessionRef.push({
+        ...item,
+        formattedTime: item.formattedTime || new Date().toLocaleString('en-IN',{
+          timeZone:'Asia/Kolkata', hour12:false }),
+        synced_at: Date.now(), auto_synced: true,
+      });
+      sent++;
+    }
+    lqClear();
+    toast('✅ Auto-sync: ' + sent + ' items PC को भेजे गए!', 'ok', 3500);
+  } catch(err) {
+    console.error('[PWA] autoSync error:', err.message);
+    toast('⚠️ Auto-sync failed (' + sent + '/' + toSend.length + ')', 'warn', 4000);
+  }
+}
 
 document.getElementById('syncNowBtn')?.addEventListener('click', async () => {
   const btn = $('syncNowBtn');

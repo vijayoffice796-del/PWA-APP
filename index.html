@@ -477,6 +477,16 @@
         </div>
       </label>
 
+      <!-- Fix 6: Sync Offline Queue button moved here from Settings -->
+      <div style="margin-bottom:12px;">
+        <button class="btn btn-dark btn-full" id="syncNowBtn">
+          🔄 Sync Offline Firebase Queue
+        </button>
+        <div style="font-size:10px;color:var(--slate-400);margin-top:4px;text-align:center;">
+          Firebase pending_scans को process करने के लिए
+        </div>
+      </div>
+
       <!-- Camera -->
       <div class="cam-wrap" id="camWrap">
         <div id="qr-reader" style="width:100%;"></div>
@@ -574,11 +584,34 @@
 
       <!-- OCR result card -->
       <div class="card" id="ocrResultCard" style="display:none;">
-        <div class="card-title">📄 Extracted Text</div>
-        <div class="ocr-result show" id="ocrResultBox"></div>
-        <div style="display:flex;gap:8px;margin-top:10px;">
-          <button class="btn btn-primary btn-half btn-sm" id="ocrCopyBtn">📋 Copy</button>
-          <button class="btn btn-dark btn-half btn-sm"    id="ocrClearBtn">🗑️ Clear</button>
+        <div class="card-title">📄 Extracted Text
+          <span style="font-size:10px;color:var(--slate-400);font-weight:400;">
+            (edit करें, फिर Send Queue करें)
+          </span>
+        </div>
+        <!-- Editable textarea instead of read-only div -->
+        <textarea id="ocrResultBox"
+          style="width:100%;min-height:100px;max-height:200px;resize:vertical;
+            border:1.5px solid var(--slate-200);border-radius:8px;padding:10px;
+            font-size:12px;font-family:monospace;line-height:1.6;
+            color:var(--slate-700);background:var(--slate-50);outline:none;
+            transition:border-color .2s;box-sizing:border-box;"
+          placeholder="OCR text यहाँ दिखेगा — edit करें अगर ज़रूरी हो…"
+          spellcheck="false" autocorrect="off" autocapitalize="off"
+        ></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn btn-green  btn-half btn-sm" id="ocrSendQueueBtn">
+            📤 Send to Queue
+          </button>
+          <button class="btn btn-primary btn-half btn-sm" id="ocrCopyBtn">
+            📋 Copy
+          </button>
+          <button class="btn btn-dark   btn-half btn-sm" id="ocrClearBtn">
+            🗑️ Clear
+          </button>
+        </div>
+        <div style="font-size:10px;color:var(--slate-400);margin-top:5px;">
+          💡 "Send to Queue" text से CNR निकालकर local queue में डालेगा
         </div>
       </div>
 
@@ -642,11 +675,7 @@
           DB URL:    <span id="cfgUrlDisplay"  style="font-family:monospace;font-size:11px;">—</span><br>
           Offline Queue: <span id="offlineQueueCount" style="font-weight:600;color:var(--red);">0 items</span>
         </div>
-        <div style="padding:0 14px 14px;">
-          <button class="btn btn-primary btn-full btn-sm" id="syncNowBtn">
-            🔄 Sync Offline Queue Now
-          </button>
-        </div>
+
       </div>
     </div><!-- /tab-settings -->
 
