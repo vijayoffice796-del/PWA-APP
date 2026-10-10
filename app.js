@@ -675,17 +675,35 @@ $('ocrCopyBtn').addEventListener('click', () => {
   navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
 });
 
-// Tap-to-Extract: click highlighted span → fills textarea
+// Tap-to-Extract: click highlighted span → APPENDS to textarea (multi-select)
 $('ocr-highlight-box').addEventListener('click', function(e) {
   const span = e.target.closest('.cnr-highlight');
   if (!span) return;
-  const extracted = span.dataset.cnr || span.textContent || '';
+
+  const extracted = (span.dataset.cnr || span.textContent || '').trim();
   if (!extracted) return;
-  $('ocrResultBox').value = extracted;
-  $('ocrResultBox').focus();
+
+  const box      = $('ocrResultBox');
+  const existing = (box.value || '').trim();
+
+  // Duplicate check — don't add if already present
+  const parts = existing ? existing.split(',').map(function(s){ return s.trim(); }) : [];
+  if (parts.includes(extracted)) {
+    span.style.background = '#fca5a5';
+    setTimeout(function() { span.style.background = ''; }, 800);
+    toast('Already added: ' + extracted, 'warn', 1500);
+    return;
+  }
+
+  // Append with ", " separator or insert fresh
+  box.value = existing ? existing + ', ' + extracted : extracted;
+  box.focus();
+
+  // Visual feedback — flash green
   span.classList.add('tapped');
   setTimeout(function() { span.classList.remove('tapped'); }, 1200);
-  toast('📌 Extracted: ' + extracted, 'ok', 2000);
+
+  toast('Added: ' + extracted + ' (' + (parts.length + 1) + ' total)', 'ok', 2000);
 });
 
 // New Feature 2: Send to Queue from OCR text
