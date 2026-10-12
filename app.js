@@ -1,21 +1,14 @@
 // ================================================================
-//  app.js — Court Automation PWA  |  v2 (UI Redesign)
-//  Changes:
-//  - Manual tab merged into QR tab
-//  - 3 case-type radio buttons (Manual/Civil/Criminal)
-//  - Dynamic tag datalist via updateTagList()
-//  - fileTag input used for both QR scan and manual send
-//  Firebase init, sendToPC, offline queue — all unchanged
+//  app.js — Court Automation PWA  |  v2 (UI Redesign + Universal OCR)
 // ================================================================
 'use strict';
 
-// ── Firebase state (UNCHANGED) ───────────────────────────────────
+// ── Firebase state ──────────────────────────────────────────────
 let db          = null;
 let presenceRef = null;
 let pcOnline    = false;
 let fbReady     = false;
 
-// ── Hardcoded Firebase defaults (UNCHANGED) ───────────────────────
 const FB_DEFAULTS = {
   url   : 'https://court-automation-2-default-rtdb.firebaseio.com/',
   apiKey: 'AIzaSyBrgmFp4EXnO7Bb358fZdydk5HpI1UGS3o',
@@ -42,13 +35,11 @@ const SCAN_DEBOUNCE = 3000;
 let   scanLocked    = false;
 const SCAN_LOCK_MS  = 1500;
 
-// Offline-first local queue + pairing session
 let localPendingQueue = [];
 let activeSession     = null;
 const LPQ_KEY     = 'pwa_local_pending_queue';
 const SESSION_KEY = 'pwa_active_session';
 
-// ── DOM ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
 // ================================================================
@@ -136,9 +127,6 @@ const criminalTags = [
   'Accused Hostile (अभियुक्त पक्षद्रोही)',
 ];
 
-// ================================================================
-//  updateTagList() — rebuilds <datalist> based on radio selection
-// ================================================================
 function updateTagList() {
   const selected = document.querySelector('input[name="caseType"]:checked')?.value || 'manual';
   const datalist = $('tagOptions');
@@ -147,11 +135,10 @@ function updateTagList() {
   let tags;
   if (selected === 'civil')    tags = [...commonTags, ...civilTags];
   else if (selected === 'criminal') tags = [...commonTags, ...criminalTags];
-  else                          tags = [...commonTags];  // manual (default)
+  else                          tags = [...commonTags]; 
 
   datalist.innerHTML = tags.map(t => `<option value="${t}"></option>`).join('');
 
-  // Update radio label styles
   document.querySelectorAll('.ct-radio').forEach(el => {
     el.classList.remove('active-manual', 'active-civil', 'active-criminal');
   });
@@ -159,18 +146,15 @@ function updateTagList() {
   const lbl = $(labelMap[selected]);
   if (lbl) lbl.classList.add(`active-${selected}`);
 
-  // Update active tag label
   const cur = $('fileTag')?.value || '';
   $('activeTagLabel').textContent = cur || '—';
 }
 
-// Wire radio buttons — save selection, PRESERVE existing tag
 document.querySelectorAll('input[name="caseType"]').forEach(radio => {
   radio.addEventListener('change', () => {
-    const prevTag = $('fileTag').value; // save before rebuild
+    const prevTag = $('fileTag').value; 
     localStorage.setItem('ca_case_type', radio.value);
     updateTagList();
-    // Always restore the previous tag — don't clear on type change
     if (prevTag) {
       $('fileTag').value = prevTag;
       $('activeTagLabel').textContent = prevTag;
@@ -179,7 +163,6 @@ document.querySelectorAll('input[name="caseType"]').forEach(radio => {
   });
 });
 
-// Update active tag label + save to localStorage on every change
 $('fileTag').addEventListener('change', () => {
   const val = $('fileTag').value;
   $('activeTagLabel').textContent = val || '—';
@@ -209,7 +192,7 @@ function toast(msg, type = '', duration = 3000) {
 }
 
 // ================================================================
-//  FIREBASE INIT  (UNCHANGED)
+//  FIREBASE INIT
 // ================================================================
 function initFirebase(url, apiKey, prefix) {
   try {
@@ -234,7 +217,7 @@ function initFirebase(url, apiKey, prefix) {
 }
 
 // ================================================================
-//  PC PRESENCE  (UNCHANGED)
+//  PC PRESENCE
 // ================================================================
 function startPresenceListener() {
   if (!db) return;
@@ -267,7 +250,7 @@ function updatePcStatus(state, ts) {
 }
 
 // ================================================================
-//  TAB NAVIGATION (3 tabs: qr, ocr, settings)
+//  TAB NAVIGATION
 // ================================================================
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -289,8 +272,7 @@ $('contScanRow').addEventListener('click', () => {
         continuousMode ? 'ok' : 'warn', 2000);
 });
 
-$('startCamBtn').addEventListener('click', startCamera);
-$('stopCamBtn').addEventListener('click',  stopCamera);
+$('startCamBtn').addEventListener('click', startCamera);$('stopCamBtn').addEventListener('click',  stopCamera);
 
 async function startCamera() {
   if (scannerRunning) return;
@@ -298,7 +280,7 @@ async function startCamera() {
   $('startCamBtn').disabled = true; $('startCamBtn').textContent = '⏳ Starting…';
   try {
     const devices = await Html5Qrcode.getCameras();
-    if (!devices?.length) throw new Error('कोई camera नहीं मिला।');
+    if (!devices?.length) throw new Error('koi camera nahi mila.');
     const cam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length-1];
     qrScanner = new Html5Qrcode('qr-reader');
     await qrScanner.start(
@@ -307,8 +289,7 @@ async function startCamera() {
       onQRSuccess, onQRError
     );
     scannerRunning = true;
-    $('scanOverlay').classList.add('on');
-    $('stopCamBtn').disabled = false;
+    $('scanOverlay').classList.add('on');$('stopCamBtn').disabled = false;
     $('startCamBtn').disabled = true; $('startCamBtn').textContent = '▶️ Start Camera';
     toast('📷 Camera started!', 'ok', 2000);
   } catch (err) {
@@ -325,8 +306,7 @@ async function stopCamera() {
   if (!scannerRunning || !qrScanner) return;
   try { await qrScanner.stop(); qrScanner.clear(); } catch(_) {}
   qrScanner = null; scannerRunning = false;
-  $('scanOverlay').classList.remove('on');
-  $('camPlaceholder').style.display = 'flex';
+  $('scanOverlay').classList.remove('on');$('camPlaceholder').style.display = 'flex';
   $('startCamBtn').disabled = false; $('stopCamBtn').disabled = true;
   toast('⏹ Camera stopped.', 'warn', 2000);
 }
@@ -339,7 +319,6 @@ function onQRSuccess(text, result) {
   setTimeout(() => { scanLocked = false; }, SCAN_LOCK_MS);
   lastCode = text; lastScanTime = now;
   playBeep();
-  // Intercept pairing QR — do NOT add to queue
   if (text.startsWith('court_session_')) {
     activeSession = text;
     localStorage.setItem(SESSION_KEY, text);
@@ -347,9 +326,8 @@ function onQRSuccess(text, result) {
     displayQRResult('Paired: ' + text, result);
     toast('PC se pair ho gaya: ' + text.slice(-8), 'ok', 4000);
     if (!continuousMode) stopCamera();
-    return; // Do NOT add to queue
+    return; 
   }
-  // Normal scan → local queue
   scanCount++; $('scanCountDisplay').textContent = scanCount;
   displayQRResult(text, result);
   const tag        = $('fileTag').value.trim();
@@ -364,7 +342,7 @@ function onQRError(msg) {
 }
 
 function displayQRResult(text, result) {
-  const box = $('qrResult'), val = $('qrResultValue'), meta = $('qrResultMeta');
+  const box = $('qrResult'), val = $('qrResultValue'), meta =$('qrResultMeta');
   val.textContent = text;
   const fmt   = result?.result?.format?.formatName || 'QR_CODE';
   const isCnr = /^[A-Z]{2}[A-Z\d]{2}\d{10}$/.test(text.trim());
@@ -386,31 +364,18 @@ function playBeep() {
 }
 
 // ================================================================
-//  MANUAL SEND (reads tag from fileTag — same as QR)
+//  MANUAL SEND
 // ================================================================
 $('manualSendBtn').addEventListener('click', async () => {
   const raw        = $('manualInput').value.trim();
   const tag        = $('fileTag').value.trim();
   const searchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
 
-  if (!raw) { toast('⚠️ Input खाली है!', 'warn'); return; }
+  if (!raw) { toast('⚠️ Input khali hai!', 'warn'); return; }
 
-  // Split by comma, trim each, remove empty
   const items = raw.split(',').map(s => s.trim()).filter(Boolean);
+  if (!items.length) { toast('⚠️ Valid input nahi mila.', 'warn'); return; }
 
-  if (!items.length) { toast('⚠️ Valid input नहीं मिला।', 'warn'); return; }
-
-  // Validate Case Number format: Number/Year strictly
-  if (searchType === 'case_number') {
-    const caseNumPattern = /^\d+\/\d{4}$/;
-    const invalid = items.filter(i => !caseNumPattern.test(i));
-    if (invalid.length) {
-      toast(`❌ Invalid format: "${invalid[0]}" — use Number/Year (e.g. 123/2026)`, 'err', 4000);
-      return;
-    }
-  }
-
-  // Req 3: add to local queue
   items.forEach(item => addToLocalQueue(item, tag, searchType));
   const sent = items.length;
 
@@ -421,12 +386,10 @@ $('manualSendBtn').addEventListener('click', async () => {
   $('manualOk').classList.add('show');
   setTimeout(() => $('manualOk').classList.remove('show'), 3000);
 });
-$('manualClearBtn').addEventListener('click', () => {
-  $('manualInput').value = '';
+$('manualClearBtn').addEventListener('click', () => {$('manualInput').value = '';
   localStorage.removeItem('ca_manual_cnr');
 });
 
-// Req 4: Clear local queue
 $('clearLocalQueueBtn').addEventListener('click', () => {
   if (!localPendingQueue.length) { toast('Queue empty.', 'warn'); return; }
   if (!confirm(localPendingQueue.length + ' items clear karein?')) return;
@@ -434,12 +397,9 @@ $('clearLocalQueueBtn').addEventListener('click', () => {
   toast('Queue cleared.', 'warn', 2500);
 });
 
-// Sync to PC — pushes localPendingQueue to Firebase session path
 $('syncToPCBtn').addEventListener('click', async () => {
-  // Guard checks
   if (!activeSession) {
     toast('❌ Pehle PC ka Pairing QR scan karein!', 'err', 4000);
-    // Switch to QR tab so user can scan
     document.querySelector('.tab-btn[data-tab="qr"]')?.click();
     return;
   }
@@ -459,7 +419,6 @@ $('syncToPCBtn').addEventListener('click', async () => {
   let sent = 0;
   try {
     const sessionRef = db.ref('/queues/' + activeSession);
-    // Send each item with IST timestamp added
     for (const item of localPendingQueue) {
       const enriched = {
         ...item,
@@ -473,9 +432,7 @@ $('syncToPCBtn').addEventListener('click', async () => {
     }
     lqClear();
     toast('✅ ' + sent + ' items PC ko bheje gaye!', 'ok', 3500);
-    console.log('[PWA] Synced', sent, 'items to /queues/' + activeSession);
   } catch(err) {
-    // Items already pushed partially — don't clear queue
     toast('❌ Sync failed (' + sent + '/' + localPendingQueue.length + '): ' + err.message, 'err', 5000);
     console.error('[PWA] Sync error:', err.message);
   } finally {
@@ -483,17 +440,15 @@ $('syncToPCBtn').addEventListener('click', async () => {
   }
 });
 
-// Update placeholder when searchType changes
 document.querySelectorAll('input[name="searchType"]').forEach(r => {
   r.addEventListener('change', () => {
     const isCN = r.value === 'case_number';
     $('manualInput').placeholder = isCN
       ? 'Case Number: 123/2026, 45/2025…'
-      : 'CNR Number: UPBL01..., UPBL02… (comma se multiple)';
+      : 'CNR / Any Value (comma se multiple)';
   });
 });
 $('manualInput').addEventListener('input', () => {
-  // Persist as user types — survives app reload
   const val = $('manualInput').value;
   if (val) localStorage.setItem('ca_manual_cnr', val);
   else     localStorage.removeItem('ca_manual_cnr');
@@ -504,27 +459,22 @@ $('manualInput').addEventListener('keydown', e => {
 
 // ================================================================
 //  OCR + CROPPER.JS WORKFLOW
-//  Flow: image selected/captured → Crop Modal → Crop & Scan
-//        → runOCR(dataUrl) → regex → addToLocalQueue()
 // ================================================================
 let ocrWorker  = null;
-let cropperInst = null; // active Cropper.js instance
+let cropperInst = null; 
 
-// ── Helper: open crop modal with a File or dataURL ────────────────
 function openCropModal(src) {
   const img = $('cropperImg');
   img.src = src;
   $('cropModalOverlay').classList.add('show');
 
-  // Destroy any previous cropper instance
   if (cropperInst) { cropperInst.destroy(); cropperInst = null; }
 
-  // Wait for img to load before initialising Cropper
   img.onload = () => {
     cropperInst = new Cropper(img, {
-      viewMode   : 1,       // restrict crop box inside canvas
-      dragMode   : 'move',  // drag the image, not the box
-      autoCropArea: 0.85,   // default crop = 85% of image
+      viewMode   : 1,       
+      dragMode   : 'move',  
+      autoCropArea: 0.85,   
       movable    : true,
       zoomable   : true,
       scalable   : false,
@@ -540,11 +490,9 @@ function closeCropModal() {
   $('cropModalOverlay').classList.remove('show');
 }
 
-// ── Wire both file inputs → open crop modal ───────────────────────
 function onImageSelected(file) {
   if (!file) return;
-  $('ocrResultCard').style.display = 'none';
-  $('ocrPreview').classList.remove('show');
+  $('ocrResultCard').style.display = 'none';$('ocrPreview').classList.remove('show');
   const reader = new FileReader();
   reader.onload = e => openCropModal(e.target.result);
   reader.readAsDataURL(file);
@@ -552,7 +500,7 @@ function onImageSelected(file) {
 
 $('ocrInput').addEventListener('change', e => {
   onImageSelected(e.target.files[0]);
-  e.target.value = ''; // reset so same file can be reselected
+  e.target.value = ''; 
 });
 
 $('ocrCamInput').addEventListener('change', e => {
@@ -560,19 +508,16 @@ $('ocrCamInput').addEventListener('change', e => {
   e.target.value = '';
 });
 
-// ── Cancel: close modal, reset inputs ────────────────────────────
 $('cropCancelBtn').addEventListener('click', () => {
   closeCropModal();
   toast('Crop cancelled.', 'warn', 1500);
 });
 
-// ── Crop & Scan: extract cropped canvas → pass to Tesseract ───────
 $('cropScanBtn').addEventListener('click', () => {
   if (!cropperInst) return;
   $('cropScanBtn').disabled    = true;
   $('cropScanBtn').textContent = '⏳ Processing…';
   try {
-    // getCroppedCanvas returns a <canvas> — convert to dataURL
     const canvas   = cropperInst.getCroppedCanvas({
       maxWidth : 2048,
       maxHeight: 2048,
@@ -581,13 +526,10 @@ $('cropScanBtn').addEventListener('click', () => {
     });
     const dataUrl  = canvas.toDataURL('image/jpeg', 0.92);
 
-    // Show the cropped image as preview
     $('ocrPreview').src = dataUrl;
     $('ocrPreview').classList.add('show');
 
     closeCropModal();
-
-    // Pass cropped dataUrl directly into existing Tesseract OCR function
     runOCR(dataUrl);
   } catch(err) {
     toast('Crop error: ' + err.message, 'err', 3000);
@@ -597,73 +539,68 @@ $('cropScanBtn').addEventListener('click', () => {
   }
 });
 
-// ── runOCR: accepts File OR dataURL string ────────────────────────
-// All OCR extraction + addToLocalQueue logic UNCHANGED below
+// ================================================================
+//  OCR LOGIC (Universal UP + Case Number Detection)
+// ================================================================
 async function runOCR(source) {
-  $('ocrProg').classList.add('show'); $('ocrBar').style.width = '0%';
-  $('ocrProgLabel').textContent = 'Tesseract.js शुरू हो रहा है…';
+  $('ocrProg').classList.add('show'); $('ocrBar').style.width = '0\%';$('ocrProgLabel').textContent = 'Tesseract.js shuru ho raha hai…';
   try {
     if (!ocrWorker) {
       ocrWorker = await Tesseract.createWorker('eng', 1, {
         logger: m => {
           if (m.status === 'recognizing text') {
-            $('ocrBar').style.width = Math.round(m.progress * 100) + '%';
-            $('ocrProgLabel').textContent = 'Recognizing… ' + Math.round(m.progress * 100) + '%';
-          } else if (m.status === 'loading tesseract core') {
-            $('ocrProgLabel').textContent = 'Core load हो रहा है…';
-          } else if (m.status === 'loading language traineddata') {
-            $('ocrProgLabel').textContent = 'Language data load हो रहा है…';
+            $('ocrBar').style.width = Math.round(m.progress * 100) + '\%';$('ocrProgLabel').textContent = 'Recognizing… ' + Math.round(m.progress * 100) + '%';
           }
         },
       });
     }
-    $('ocrProgLabel').textContent = 'Text पहचाना जा रहा है…';
-    $('ocrBar').style.width = '30%';
+    $('ocrProgLabel').textContent = 'Text pehchana ja raha hai…';$('ocrBar').style.width = '30%';
 
-    // Tesseract accepts File, Blob, dataURL, or URL
     const { data: { text, confidence } } = await ocrWorker.recognize(source);
 
-    $('ocrBar').style.width = '100%';
-    $('ocrProgLabel').textContent = 'Done! Confidence: ' + Math.round(confidence) + '%';
-    const trimmed = text.trim() || '(कोई text नहीं मिला)';
-    $('ocrResultBox').value          = trimmed; // textarea — editable
-    $('ocrResultCard').style.display = 'block';
+    // 1. Fix common OCR slash mistakes for Case Numbers (e.g. 123|2026 -> 123/2026)
+    let cleanedText = text.replace(/(\d{1,6})[|\\Il](\d{4})/g, '$1/$2');
+    
+    // 2. Remove special characters (Keep alphanumeric, slash, comma, space)
+    cleanedText = cleanedText.replace(/[^a-zA-Z0-9\/\s,]/g, '');
+
+    $('ocrBar').style.width = '100\%';$('ocrProgLabel').textContent = 'Done! Confidence: ' + Math.round(confidence) + '%';
+    const trimmed = cleanedText.trim() || '(koi text nahi mila)';
+
+    // DO NOT auto-paste raw text into textarea
+    $('ocrResultBox').value = '';$('ocrResultCard').style.display = 'block';
     setTimeout(() => $('ocrProg').classList.remove('show'), 1500);
     toast('OCR complete! Confidence: ' + Math.round(confidence) + '%', 'ok', 3000);
 
-    // ── Multi-CNR extraction (UNCHANGED logic) ────────────────────
-    const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
     const foundCNRs = new Set();
 
-    // Logic 1: strict 16-digit UPBL CNRs
-    const strictMatches = cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || [];
-    strictMatches.forEach(m => foundCNRs.add(m));
+    // Catch ANY word starting with UP (No length limit)
+    const upMatches = trimmed.match(/\bUP[A-Z0-9]*\b/gi) || [];
+    upMatches.forEach(m => foundCNRs.add(m.toUpperCase()));
 
-    // Logic 2: fallback 12-char → prepend UPBL
-    let remainder = cleaned;
-    foundCNRs.forEach(c => { remainder = remainder.replace(c, ''); });
-    const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
-    fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
+    // Catch Case Numbers (e.g., 123/2026)
+    const caseMatches = trimmed.match(/\b\d{1,6}\/\d{4}\b/g) || [];
+    caseMatches.forEach(m => foundCNRs.add(m));
 
-        // Smart Highlight: find UP* words AND 10+ digit numbers
-    const HIGHLIGHT_RE = /\b(UP[a-zA-Z0-9]+|\d{10,})\b/gi;
+    // Smart Highlight RegEx
+    const HIGHLIGHT_RE = /\b(UP[A-Z0-9]*|\d{1,6}\/\d{4})\b/gi;
     const highlighted  = trimmed.replace(HIGHLIGHT_RE, function(match) {
       const safe = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       return '<span class="cnr-highlight" data-cnr="' + safe + '">' + safe + '</span>';
     });
+    
     const hlBox = $('ocr-highlight-box');
     if (hlBox) {
-      hlBox.innerHTML = highlighted ||
-        '<em style="color:#94a3b8">No highlighted terms found</em>';
+      hlBox.innerHTML = highlighted || '<em style="color:#94a3b8">No highlighted terms found</em>';
     }
 
     if (foundCNRs.size > 0) {
-      console.log('[PWA] OCR CNRs auto-detected:', [...foundCNRs]);
-      toast(foundCNRs.size + ' CNR मिले — tap करें या "Send to Queue" दबाएं।', 'ok', 3500);
+      console.log('[PWA] OCR Extracted:', [...foundCNRs]);
+      toast(foundCNRs.size + ' items mile — tap karein ya "Send to Queue" dabayein.', 'ok', 3500);
     } else {
-      console.log('[PWA] OCR: no CNR pattern found');
-      toast('OCR हो गया — highlighted terms tap करें या edit करके Send करें।', 'warn', 3000);
-    }  } catch(err) {
+      toast('OCR ho gaya — highlighted terms tap karein ya edit karke Send karein.', 'warn', 3000);
+    }  
+  } catch(err) {
     $('ocrProgLabel').textContent = 'Error: ' + err.message;
     toast('OCR failed: ' + err.message, 'err');
     setTimeout(() => $('ocrProg').classList.remove('show'), 3000);
@@ -675,7 +612,6 @@ $('ocrCopyBtn').addEventListener('click', () => {
   navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
 });
 
-// Tap-to-Extract: click highlighted span → APPENDS to textarea (multi-select)
 $('ocr-highlight-box').addEventListener('click', function(e) {
   const span = e.target.closest('.cnr-highlight');
   if (!span) return;
@@ -686,7 +622,6 @@ $('ocr-highlight-box').addEventListener('click', function(e) {
   const box      = $('ocrResultBox');
   const existing = (box.value || '').trim();
 
-  // Duplicate check — don't add if already present
   const parts = existing ? existing.split(',').map(function(s){ return s.trim(); }) : [];
   if (parts.includes(extracted)) {
     span.style.background = '#fca5a5';
@@ -695,66 +630,49 @@ $('ocr-highlight-box').addEventListener('click', function(e) {
     return;
   }
 
-  // Append with ", " separator or insert fresh
   box.value = existing ? existing + ', ' + extracted : extracted;
   box.focus();
 
-  // Visual feedback — flash green
   span.classList.add('tapped');
   setTimeout(function() { span.classList.remove('tapped'); }, 1200);
 
   toast('Added: ' + extracted + ' (' + (parts.length + 1) + ' total)', 'ok', 2000);
 });
 
-// New Feature 2: Send to Queue from OCR text
 $('ocrSendQueueBtn').addEventListener('click', () => {
   const text    = $('ocrResultBox').value.trim();
   const ocrTag  = $('fileTag')?.value?.trim() || '';
-  if (!text) { toast('⚠️ Text box खाली है।', 'warn'); return; }
+  if (!text) { toast('⚠️ Text box khali hai.', 'warn'); return; }
 
-  // Run same CNR extraction on the (possibly edited) text
-  const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
-  const found   = new Set();
-
-  // Logic 1: strict UPBL CNRs
-  (cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || []).forEach(m => found.add(m));
-
-  // Logic 2: fallback 12-char → prepend UPBL
-  let rem = cleaned;
-  found.forEach(c => { rem = rem.replace(c, ''); });
-  (rem.match(/[A-Z0-9]{2}\d{10}/g) || []).forEach(m => found.add('UPBL' + m));
-
-  if (!found.size) {
-    toast('❌ Text में कोई CNR pattern नहीं मिला।', 'err', 3000);
-    return;
-  }
-
-  for (const cnr of found) { addToLocalQueue(cnr, ocrTag, 'cnr'); }
-  toast('✅ ' + found.size + ' CNR queue में add हुए!', 'ok', 3000);
+  // Bypass strict validation: Send whatever is in the textarea separated by commas
+  const items = text.split(',').map(s => s.trim()).filter(Boolean);
+  
+  items.forEach(item => addToLocalQueue(item.toUpperCase(), ocrTag, 'cnr'));
+  
+  toast('✅ ' + items.length + ' items queue mein add hue!', 'ok', 3000);
   $('ocrResultBox').style.borderColor = 'var(--green)';
   setTimeout(() => { $('ocrResultBox').style.borderColor = ''; }, 2000);
 });
-$('ocrClearBtn').addEventListener('click', () => {
-  $('ocrPreview').classList.remove('show');
-  $('ocrResultCard').style.display = 'none';
-  $('ocrResultBox').value = '';
+
+$('ocrClearBtn').addEventListener('click', () => {$('ocrPreview').classList.remove('show');
+  $('ocrResultCard').style.display = 'none';$('ocrResultBox').value = '';
   const hlBox = $('ocr-highlight-box');
   if (hlBox) hlBox.innerHTML = '';
-  $('ocrInput').value = ''; $('ocrCamInput').value = '';
+  $('ocrInput').value = '';$('ocrCamInput').value = '';
   closeCropModal();
 });
 
 // ================================================================
-//  SETTINGS — Firebase Config Save  (UNCHANGED)
+//  SETTINGS — Firebase Config Save
 // ================================================================
 $('saveCfgBtn').addEventListener('click', () => {
   const url    = $('cfgUrl').value.trim();
   const apiKey = $('cfgApiKey').value.trim();
   const prefix = $('cfgPath').value.trim() || '/automation';
-  const err    = $('cfgError'), ok = $('cfgOk');
+  const err    = $('cfgError'), ok =$('cfgOk');
   err.classList.remove('show'); ok.classList.remove('show');
 
-  if (!url) { err.textContent='❌ Database URL खाली है।'; err.classList.add('show'); return; }
+  if (!url) { err.textContent='❌ Database URL khali hai.'; err.classList.add('show'); return; }
   if (!url.startsWith('https://') || !url.includes('firebaseio.com')) {
     err.textContent='❌ Valid URL: https://xxx.firebaseio.com'; err.classList.add('show'); return;
   }
@@ -783,15 +701,15 @@ $('saveCfgBtn').addEventListener('click', () => {
 });
 
 // ================================================================
-//  sendToPC  (UNCHANGED — core Firebase logic)
+//  sendToPC
 // ================================================================
 async function sendToPC(cnr, tag, searchType = 'cnr') {
-  if (!cnr?.trim()) { toast('⚠️ Input खाली है।', 'warn'); return; }
+  if (!cnr?.trim()) { toast('⚠️ Input khali hai.', 'warn'); return; }
 
   const payload = {
     cnr          : cnr.trim().toUpperCase(),
     tag          : tag || '',
-    searchType   : searchType || 'cnr',   // 'cnr' or 'case_number'
+    searchType   : searchType || 'cnr',   
     timestamp    : Date.now(),
     formattedTime: new Date().toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
@@ -808,16 +726,16 @@ async function sendToPC(cnr, tag, searchType = 'cnr') {
   }
   if (!navigator.onLine) {
     saveToOfflineQueue(payload);
-    toast(`📴 Offline: "${payload.cnr}" queue में सेव हुआ`, 'warn', 3000);
+    toast(`📴 Offline: "${payload.cnr}" queue mein save hua`, 'warn', 3000);
     return;
   }
   try {
     const targetPath = pcOnline ? FB_PATH().cnrQueue : FB_PATH().pendingScans;
     await db.ref(targetPath).push(payload);
     if (pcOnline) {
-      toast(`✅ PC को भेजा: ${payload.cnr}`, 'ok', 2500);
+      toast(`✅ PC ko bheja: ${payload.cnr}`, 'ok', 2500);
     } else {
-      toast(`🕐 Queue में डाला: ${payload.cnr} (PC offline)`, 'warn', 3000);
+      toast(`🕐 Queue mein dala: ${payload.cnr} (PC offline)`, 'warn', 3000);
     }
   } catch (err) {
     saveToOfflineQueue(payload);
@@ -827,7 +745,7 @@ async function sendToPC(cnr, tag, searchType = 'cnr') {
 }
 
 // ================================================================
-//  OFFLINE QUEUE  (UNCHANGED)
+//  OFFLINE QUEUE
 // ================================================================
 function saveToOfflineQueue(payload) {
   try {
@@ -846,7 +764,7 @@ async function syncOfflineQueue() {
     if (!raw) return;
     const queue = JSON.parse(raw);
     if (!queue.length) return;
-    toast(`🔄 ${queue.length} offline items sync हो रहे हैं…`, 'ok', 3000);
+    toast(`🔄 ${queue.length} offline items sync ho rahe hain…`, 'ok', 3000);
     const ref = db.ref(FB_PATH().pendingScans);
     for (const item of queue) {
       await ref.push({ ...item, synced_at: Date.now() });
@@ -870,14 +788,13 @@ function updateOfflineQueueBadge(count) {
 }
 
 window.addEventListener('online', () => {
-  toast('🌐 Internet मिला — sync शुरू हो रही है…', 'ok', 2000);
+  toast('🌐 Internet mila — sync shuru ho rahi hai…', 'ok', 2000);
   setTimeout(() => { syncOfflineQueue(); autoSyncLocalQueue(); }, 1200);
 });
 window.addEventListener('offline', () => {
-  toast('📴 Internet नहीं है — Offline Mode।', 'warn', 4000);
+  toast('📴 Internet nahi hai — Offline Mode.', 'warn', 4000);
 });
 
-// Fix 5: Auto-sync localPendingQueue when internet restored
 async function autoSyncLocalQueue() {
   if (!activeSession)                { console.log('[PWA] autoSync: no session'); return; }
   if (!fbReady || !db)               { console.log('[PWA] autoSync: Firebase not ready'); return; }
@@ -898,7 +815,7 @@ async function autoSyncLocalQueue() {
       sent++;
     }
     lqClear();
-    toast('✅ Auto-sync: ' + sent + ' items PC को भेजे गए!', 'ok', 3500);
+    toast('✅ Auto-sync: ' + sent + ' items PC ko bheje gaye!', 'ok', 3500);
   } catch(err) {
     console.error('[PWA] autoSync error:', err.message);
     toast('⚠️ Auto-sync failed (' + sent + '/' + toSend.length + ')', 'warn', 4000);
@@ -913,7 +830,7 @@ document.getElementById('syncNowBtn')?.addEventListener('click', async () => {
 });
 
 // ================================================================
-//  VISIBILITY — stop camera in background
+//  VISIBILITY
 // ================================================================
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && scannerRunning) {
@@ -938,7 +855,7 @@ async function boot() {
   $('cfgPath').value   = FB_PREFIX;
 
   if (FB_URL) {
-    $('loadingTxt').textContent = 'Firebase connect हो रहा है…';
+    $('loadingTxt').textContent = 'Firebase connect ho raha hai…';
     const ok = initFirebase(FB_URL, FB_APIKEY, FB_PREFIX);
     if (ok) {
       $('cfgStatusLabel').textContent = '🟢 Connected';
@@ -946,13 +863,12 @@ async function boot() {
       startPresenceListener();
     } else {
       $('cfgStatusLabel').textContent = '🔴 Config error';
-      toast('⚠️ Firebase init failed. Settings में URL check करें।', 'warn', 5000);
+      toast('⚠️ Firebase init failed. Settings mein URL check karein.', 'warn', 5000);
     }
   } else {
     updatePcStatus('offline', null);
   }
 
-  // Check offline queue
   try {
     const raw = localStorage.getItem('offline_queue');
     if (raw) {
@@ -961,25 +877,20 @@ async function boot() {
     }
   } catch(_) {}
 
-  // Restore last selected case type and tag from localStorage
   const savedCaseType = localStorage.getItem('ca_case_type') || 'manual';
   const savedTag      = localStorage.getItem('ca_last_tag')  || '';
 
-  // Set the correct radio button
   const radio = document.querySelector(`input[name="caseType"][value="${savedCaseType}"]`);
   if (radio) radio.checked = true;
 
-  // Build datalist for saved case type, then restore tag
   updateTagList();
   if (savedTag) {
     $('fileTag').value = savedTag;
     $('activeTagLabel').textContent = savedTag;
   }
 
-  // Fix 1: restore manual CNR input if user had typed it
   const savedManualCNR = localStorage.getItem('ca_manual_cnr') || '';
-  if (savedManualCNR && $('manualInput')) {
-    $('manualInput').value = savedManualCNR;
+  if (savedManualCNR && $('manualInput')) {$('manualInput').value = savedManualCNR;
   }
 
   lqLoad();
