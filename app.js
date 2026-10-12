@@ -272,7 +272,8 @@ $('contScanRow').addEventListener('click', () => {
         continuousMode ? 'ok' : 'warn', 2000);
 });
 
-$('startCamBtn').addEventListener('click', startCamera);$('stopCamBtn').addEventListener('click',  stopCamera);
+$('startCamBtn').addEventListener('click', startCamera);
+$('stopCamBtn').addEventListener('click',  stopCamera);
 
 async function startCamera() {
   if (scannerRunning) return;
@@ -540,7 +541,7 @@ $('cropScanBtn').addEventListener('click', () => {
 });
 
 // ================================================================
-//  OCR LOGIC (Universal UP + Case Number Detection)
+//  OCR LOGIC (Universal UP + Case Number Detection + O to 0 Fix)
 // ================================================================
 async function runOCR(source) {
   $('ocrProg').classList.add('show'); $('ocrBar').style.width = '0\%';$('ocrProgLabel').textContent = 'Tesseract.js shuru ho raha hai…';
@@ -561,7 +562,16 @@ async function runOCR(source) {
     // 1. Fix common OCR slash mistakes for Case Numbers (e.g. 123|2026 -> 123/2026)
     let cleanedText = text.replace(/(\d{1,6})[|\\Il](\d{4})/g, '$1/$2');
     
-    // 2. Remove special characters (Keep alphanumeric, slash, comma, space)
+    // 2. Fix 'O' vs '0' mistake in UP CNRs ONLY IF length > 10 (protects vehicle numbers like UP61T4169)
+    cleanedText = cleanedText.replace(/\bUP[A-Z0-9]+\b/gi, function(match) {
+      if (match.length > 10) {
+        // Keep first 4 chars safe (e.g., UPBL), replace 'O' with '0' in the rest
+        return match.substring(0, 4).toUpperCase() + match.substring(4).toUpperCase().replace(/O/g, '0');
+      }
+      return match.toUpperCase();
+    });
+
+    // 3. Remove special characters (Keep alphanumeric, slash, comma, space)
     cleanedText = cleanedText.replace(/[^a-zA-Z0-9\/\s,]/g, '');
 
     $('ocrBar').style.width = '100\%';$('ocrProgLabel').textContent = 'Done! Confidence: ' + Math.round(confidence) + '%';
