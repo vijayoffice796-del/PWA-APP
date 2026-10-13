@@ -58,16 +58,19 @@ function lqAdd(item)  { localPendingQueue.push(item); lqSave(); }
 function lqClear()    { localPendingQueue = []; lqSave(); }
 function updateQueueCounter() {
   const el = $('localQueueCount'); if (el) el.textContent = localPendingQueue.length;
+  const ocrEl = $('ocrLocalQueueCount'); if (ocrEl) ocrEl.textContent = localPendingQueue.length;
 }
 function updateSessionStatus() {
-  const el = $('sessionStatusLabel'); if (!el) return;
+  const el = $('sessionStatusLabel'); 
+  const ocrEl = $('ocrSessionStatusLabel');
+  let txt = '⚪ Not paired — scan PC QR';
+  let cls = 'lq-sub unpaired';
   if (activeSession) {
-    el.textContent = '🟢 Paired: ' + activeSession.slice(-8);
-    el.className   = 'lq-sub paired';
-  } else {
-    el.textContent = '⚪ Not paired — scan PC QR';
-    el.className   = 'lq-sub unpaired';
+    txt = '🟢 Paired: ' + activeSession.slice(-8);
+    cls = 'lq-sub paired';
   }
+  if (el) { el.textContent = txt; el.className = cls; }
+  if (ocrEl) { ocrEl.textContent = txt; ocrEl.className = cls; }
 }
 function loadSession() {
   activeSession = localStorage.getItem(SESSION_KEY) || null;
@@ -398,7 +401,8 @@ $('clearLocalQueueBtn').addEventListener('click', () => {
   toast('Queue cleared.', 'warn', 2500);
 });
 
-$('syncToPCBtn').addEventListener('click', async () => {
+// Common function for syncing to PC
+async function executeSyncToPC(btn) {
   if (!activeSession) {
     toast('❌ Pehle PC ka Pairing QR scan karein!', 'err', 4000);
     document.querySelector('.tab-btn[data-tab="qr"]')?.click();
@@ -414,7 +418,7 @@ $('syncToPCBtn').addEventListener('click', async () => {
     toast('📴 Internet nahi hai.', 'warn', 3000); return;
   }
 
-  const btn = $('syncToPCBtn');
+  const originalText = btn.textContent;
   btn.disabled = true; btn.textContent = '⏳ Syncing...';
 
   let sent = 0;
@@ -437,9 +441,13 @@ $('syncToPCBtn').addEventListener('click', async () => {
     toast('❌ Sync failed (' + sent + '/' + localPendingQueue.length + '): ' + err.message, 'err', 5000);
     console.error('[PWA] Sync error:', err.message);
   } finally {
-    btn.disabled = false; btn.textContent = '📤 Sync to PC';
+    btn.disabled = false; btn.textContent = originalText;
   }
-});
+}
+
+$('syncToPCBtn').addEventListener('click', function() { executeSyncToPC(this); });
+const ocrSyncBtn = $('ocrSyncToPCBtn');
+if (ocrSyncBtn) ocrSyncBtn.addEventListener('click', function() { executeSyncToPC(this); });
 
 document.querySelectorAll('input[name="searchType"]').forEach(r => {
   r.addEventListener('change', () => {

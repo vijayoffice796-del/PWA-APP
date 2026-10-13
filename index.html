@@ -648,6 +648,22 @@
         ⚠️ OCR पहली बार Tesseract model download करेगा (~20MB)।<br>
         Image upload/capture करें → Crop करें → Scan होगा।
       </div>
+
+      <!-- OCR Tab Local Queue Sync (New) -->
+      <div class="local-queue-bar" style="margin-top:12px;">
+        <div class="lq-left">
+          <span class="lq-icon">📋</span>
+          <div>
+            <div class="lq-label">Items waiting to send</div>
+            <div class="lq-sub" id="ocrSessionStatusLabel">⚪ Not paired — scan PC's QR</div>
+          </div>
+        </div>
+        <div class="lq-count" id="ocrLocalQueueCount">0</div>
+      </div>
+      <button class="btn btn-green btn-full" id="ocrSyncToPCBtn" style="margin-bottom:12px;">
+        📤 Sync to PC
+      </button>
+
     </div><!-- /tab-ocr -->
 
     <!-- ══════════════════════════════════
