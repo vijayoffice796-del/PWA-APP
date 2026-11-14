@@ -557,6 +557,11 @@
           </label>
         </div>
 
+<label class="urgent-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #fed7aa;background:#fff7ed;border-radius:10px;font-size:12px;font-weight:700;color:#9a3412;cursor:pointer;">
+          <input type="checkbox" id="urgentToggleQr" style="width:18px;height:18px;accent-color:#ea580c;"/> ⚡ Auto-Search (Urgent Mode)
+          <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
+        </label>
+
         <!-- dynamic placeholder updates with searchType -->
         <input class="manual-input" type="text" id="manualInput"
           placeholder="CNR Number यहाँ लिखें… (comma से multiple)"
@@ -584,6 +589,11 @@
          TAB 2: OCR SCAN
     ══════════════════════════════════ -->
     <div class="tab-panel" id="tab-ocr">
+
+<label class="urgent-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #fed7aa;background:#fff7ed;border-radius:10px;font-size:12px;font-weight:700;color:#9a3412;cursor:pointer;">
+          <input type="checkbox" id="urgentToggleOcr" style="width:18px;height:18px;accent-color:#ea580c;"/> ⚡ Auto-Search (Urgent Mode)
+          <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
+        </label>
 
       <!-- Source buttons: Camera Capture + Upload -->
       <div class="ocr-source-row">
@@ -648,22 +658,6 @@
         ⚠️ OCR पहली बार Tesseract model download करेगा (~20MB)।<br>
         Image upload/capture करें → Crop करें → Scan होगा।
       </div>
-
-      <!-- OCR Tab Local Queue Sync (New) -->
-      <div class="local-queue-bar" style="margin-top:12px;">
-        <div class="lq-left">
-          <span class="lq-icon">📋</span>
-          <div>
-            <div class="lq-label">Items waiting to send</div>
-            <div class="lq-sub" id="ocrSessionStatusLabel">⚪ Not paired — scan PC's QR</div>
-          </div>
-        </div>
-        <div class="lq-count" id="ocrLocalQueueCount">0</div>
-      </div>
-      <button class="btn btn-green btn-full" id="ocrSyncToPCBtn" style="margin-bottom:12px;">
-        📤 Sync to PC
-      </button>
-
     </div><!-- /tab-ocr -->
 
     <!-- ══════════════════════════════════
