@@ -620,6 +620,12 @@
           <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
         </label>
 
+      <!-- v10: sticky Continuous Scan toggle — next to the camera trigger (outside the processing screen) -->
+      <label class="global-setting" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #bfdbfe;background:#eff6ff;border-radius:10px;font-size:12px;font-weight:700;color:#1e3a8a;cursor:pointer;">
+        <input type="checkbox" id="continuousCamera" style="width:18px;height:18px;accent-color:#2563eb;"/> Enable Continuous Scan Loop
+        <span style="font-weight:400;font-size:10px;color:#3b82f6;">Send के बाद camera अपने-आप फिर खुलेगा</span>
+      </label>
+
       <!-- Source buttons: Camera Capture + Upload -->
       <div class="ocr-source-row">
         <!-- Camera capture -->
@@ -660,7 +666,7 @@
             font-size:12px;font-family:monospace;line-height:1.6;
             color:var(--slate-700);background:var(--slate-50);outline:none;
             transition:border-color .2s;box-sizing:border-box;"
-          placeholder="OCR text यहाँ दिखेगा — edit करें अगर ज़रूरी हो…"
+          placeholder="ऊपर के words पर tap करें — वे यहाँ जुड़ते जाएँगे (या खुद टाइप करें)…"
           spellcheck="false" autocorrect="off" autocapitalize="off"
         ></textarea>
         <div style="display:flex;gap:8px;margin-top:8px;">
@@ -697,9 +703,10 @@
     <div class="crop-modal-overlay" id="cropModalOverlay">
       <div class="crop-modal">
         <div class="crop-modal-header">
-          <div>
+          <button class="btn btn-dark btn-sm" id="cropRotateBtn" type="button" title="Rotate 90°" style="margin-right:10px;white-space:nowrap;">↻ Rotate 90°</button>
+          <div style="flex:1;">
             <div class="crop-modal-title">✂️ Crop Image</div>
-            <div class="crop-modal-hint">हरे किनारों / कोनों को खींचकर text को कस के घेरें · Pinch = zoom · फिर Crop &amp; Scan</div>
+            <div class="crop-modal-hint">हरे किनारों / कोनों को खींचकर text को कस के घेरें · Pinch = zoom · Landscape हो तो ↻ दबाएँ · फिर Crop &amp; Scan</div>
           </div>
         </div>
         <!-- Cropper.js attaches to this img -->

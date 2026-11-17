@@ -552,7 +552,7 @@ function openCropModal(src) {
       zoomable   : true,    // pinch to zoom still works
       zoomOnTouch: true,
       scalable   : false,
-      rotatable  : false,
+      rotatable  : true,     // v10: ↻ Rotate 90° button
       responsive : true,
       background : false,
       guides     : true,
@@ -584,6 +584,9 @@ $('ocrCamInput').addEventListener('change', e => {
   onImageSelected(e.target.files[0]);
   e.target.value = '';
 });
+
+// ── v10: ↻ Rotate 90° (fix landscape documents BEFORE Crop & Scan) ──
+$('cropRotateBtn').addEventListener('click', () => { if (cropperInst) cropperInst.rotate(90); });
 
 // ── Cancel: close modal, reset inputs ────────────────────────────
 $('cropCancelBtn').addEventListener('click', () => {
@@ -655,6 +658,11 @@ async function openCam() {
     return true;
   } catch (err) { stopCam(); return false; }
 }
+// v10: single entry point for "open the camera" (live camera, or the native camera input when live is unavailable)
+function openCamera() {
+  if (camLiveFailed || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { $('ocrCamInput').click(); return Promise.resolve(false); }
+  return openCam().then(ok => { if (!ok) { camLiveFailed = true; toast('Live camera नहीं खुला — phone का camera app खुलेगा', 'warn', 2500); $('ocrCamInput').click(); } return ok; });
+}
 let camLiveFailed = false;                                          // once the live camera fails (permission / no API) the native camera input is used
 $('ocrCamInput').addEventListener('click', e => {                  // intercept the label's file-picker click
   if (camLiveFailed || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return;      // fallback → native camera input
@@ -671,6 +679,18 @@ $('camShutterBtn').addEventListener('click', () => {
 });
 $('camCloseBtn').addEventListener('click', stopCam);
 document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
+
+// ── v10: word chips ──
+function renderOcrChips(text) {
+  const box = $('ocr-highlight-box'); if (!box) return;
+  box.textContent = '';
+  const seen = new Set(), words = String(text || '').split(/\s+/).filter(w => /[A-Z0-9\u0900-\u097F]/i.test(w));
+  words.forEach(w => {
+    if (seen.has(w)) return; seen.add(w);                           // each distinct word once
+    const s = document.createElement('span'); s.className = 'cnr-highlight'; s.dataset.cnr = w; s.textContent = w; box.appendChild(s);
+  });
+  if (!seen.size) { const em = document.createElement('em'); em.style.color = '#94a3b8'; em.textContent = 'कोई word नहीं मिला — दोबारा scan करें'; box.appendChild(em); }
+}
 
 // ── runOCR: accepts File OR dataURL string ────────────────────────
 // All OCR extraction + addToLocalQueue logic UNCHANGED below
@@ -697,12 +717,13 @@ async function runOCR(source) {
     $('ocrBar').style.width = '30%';
 
     // Tesseract accepts File, Blob, dataURL, or URL
-    const { data: { text, confidence } } = await ocrWorker.recognize(source);
+    const { data: { text: rawText, confidence } } = await ocrWorker.recognize(source);
+    const text = String(rawText || '').toUpperCase();   // v10: strict uppercase BEFORE chips / sandbox — no lowercase ever reaches the UI
 
     $('ocrBar').style.width = '100%';
     $('ocrProgLabel').textContent = 'Done! Confidence: ' + Math.round(confidence) + '%';
     const trimmed = text.trim() || '(कोई text नहीं मिला)';
-    $('ocrResultBox').value          = trimmed; // textarea — editable
+    $('ocrResultBox').value          = '';      // v10: sandbox stays EMPTY — the user taps the words he needs (chips below)
     $('ocrResultCard').style.display = 'block';
     setTimeout(() => $('ocrProg').classList.remove('show'), 1500);
     toast('OCR complete! Confidence: ' + Math.round(confidence) + '%', 'ok', 3000);
@@ -721,17 +742,8 @@ async function runOCR(source) {
     const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
     fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
 
-        // Smart Highlight: find UP* words AND 10+ digit numbers
-    const HIGHLIGHT_RE = /\b(UP[a-zA-Z0-9]+|\d{10,})\b/gi;
-    const highlighted  = trimmed.replace(HIGHLIGHT_RE, function(match) {
-      const safe = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return '<span class="cnr-highlight" data-cnr="' + safe + '">' + safe + '</span>';
-    });
-    const hlBox = $('ocr-highlight-box');
-    if (hlBox) {
-      hlBox.innerHTML = highlighted ||
-        '<em style="color:#94a3b8">No highlighted terms found</em>';
-    }
+    // v10 Tap-to-Add: every OCR word becomes a chip; tapping a chip APPENDS it (+ trailing space) to the sandbox
+    renderOcrChips(text);
 
     if (foundCNRs.size > 0) {
       console.log('[PWA] OCR CNRs auto-detected:', [...foundCNRs]);
@@ -751,17 +763,16 @@ $('ocrCopyBtn').addEventListener('click', () => {
   navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
 });
 
-// Tap-to-Extract: click highlighted span → fills textarea
+// v10 Tap-to-Add: tapping a word chip APPENDS that exact word (+ space) to the sandbox
 $('ocr-highlight-box').addEventListener('click', function(e) {
   const span = e.target.closest('.cnr-highlight');
   if (!span) return;
-  const extracted = span.dataset.cnr || span.textContent || '';
-  if (!extracted) return;
-  $('ocrResultBox').value = extracted;
-  $('ocrResultBox').focus();
+  const word = span.dataset.cnr || span.textContent || '';
+  if (!word) return;
+  const box = $('ocrResultBox'); box.value = box.value + word + ' ';
+  box.scrollTop = box.scrollHeight;
   span.classList.add('tapped');
   setTimeout(function() { span.classList.remove('tapped'); }, 1200);
-  toast('📌 Extracted: ' + extracted, 'ok', 2000);
 });
 
 // New Feature 2: Send to Queue from OCR text
@@ -776,6 +787,12 @@ $('ocrSendQueueBtn').addEventListener('click', () => {
   if (!items.length) { toast('⚠️ Text box खाली है।', 'warn'); return; }
   items.forEach(it => addToLocalQueue(it, ocrTag, 'cnr'));
   toast('✅ ' + items.length + ' item queue में add हुए!', 'ok', 3000);
+  if ($('continuousCamera') && $('continuousCamera').checked) {      // v10 Continuous Scan Loop: clean the screen, reopen the camera straight away
+    $('ocrResultBox').value = ''; const hb = $('ocr-highlight-box'); if (hb) hb.textContent = '';
+    $('ocrResultCard').style.display = 'none'; $('ocrPreview').classList.remove('show');
+    setTimeout(openCamera, 250);
+    return;
+  }
   $('ocrResultBox').style.borderColor = 'var(--green)';
   setTimeout(() => { $('ocrResultBox').style.borderColor = ''; }, 2000);
 });
@@ -1039,3 +1056,10 @@ boot();
 
 // ⚡ Urgent Mode toggles
 initUrgentToggles();
+
+// v10: sticky "Continuous Scan Loop" toggle (localStorage)
+(function initContinuousToggle() {
+  const cb = $('continuousCamera'); if (!cb) return;
+  try { cb.checked = localStorage.getItem('continuousCameraState') === 'true'; } catch (_) { cb.checked = false; }
+  cb.addEventListener('change', () => { try { localStorage.setItem('continuousCameraState', String(cb.checked)); } catch (_) {} });
+})();
