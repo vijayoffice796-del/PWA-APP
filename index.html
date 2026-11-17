@@ -341,6 +341,31 @@
       border-top:1px solid rgba(255,255,255,.1);
     }
 
+    /* v9: bigger touch handles → every side + corner of the crop box is easy to grab */
+    .cropper-point { width:26px !important; height:26px !important; border-radius:50%; background:#22c55e !important; opacity:.95 !important; }
+    .cropper-point.point-e  { right:-13px !important; margin-top:-13px !important; }
+    .cropper-point.point-w  { left:-13px !important;  margin-top:-13px !important; }
+    .cropper-point.point-n  { top:-13px !important;   margin-left:-13px !important; }
+    .cropper-point.point-s  { bottom:-13px !important; margin-left:-13px !important; }
+    .cropper-point.point-ne { top:-13px !important; right:-13px !important; }
+    .cropper-point.point-nw { top:-13px !important; left:-13px !important; }
+    .cropper-point.point-sw { bottom:-13px !important; left:-13px !important; }
+    .cropper-point.point-se { bottom:-13px !important; right:-13px !important; width:26px !important; height:26px !important; }
+    .cropper-line { background:#22c55e !important; opacity:.55 !important; }
+    .cropper-line.line-e { width:28px !important; right:-14px !important; }
+    .cropper-line.line-w { width:28px !important; left:-14px !important; }
+    .cropper-line.line-n { height:28px !important; top:-14px !important; }
+    .cropper-line.line-s { height:28px !important; bottom:-14px !important; }
+    .cropper-view-box { outline:2px solid #22c55e !important; }
+    .crop-img-wrap { max-height:60vh; }
+    /* v9: in-app camera */
+    .cam-overlay { display:none; position:fixed; inset:0; background:#000; z-index:9995; flex-direction:column; }
+    .cam-overlay.show { display:flex; }
+    .cam-overlay video { flex:1; width:100%; min-height:0; object-fit:cover; background:#000; }
+    .cam-bar { display:flex; align-items:center; justify-content:space-between; padding:16px 28px calc(16px + env(safe-area-inset-bottom)); background:#000; }
+    .cam-shutter { width:72px; height:72px; border-radius:50%; border:5px solid #fff; background:#ef4444; cursor:pointer; }
+    .cam-close { background:rgba(255,255,255,.15); color:#fff; border:0; border-radius:10px; padding:12px 16px; font-size:14px; font-weight:700; }
+
     /* OCR tab upload button row */
     .ocr-source-row {
       display:flex; gap:10px; margin-bottom:12px;
@@ -663,12 +688,18 @@
     <!-- ══════════════════════════════════
          CROP MODAL (global — outside tabs)
     ══════════════════════════════════ -->
+    <!-- v9: live camera (shutter → Crop screen directly) -->
+    <div class="cam-overlay" id="camModalOverlay">
+      <video id="camVideo" autoplay playsinline muted></video>
+      <div class="cam-bar"><button class="cam-close" id="camCloseBtn" type="button">✕ Close</button><button class="cam-shutter" id="camShutterBtn" type="button" aria-label="Capture"></button><span style="width:72px"></span></div>
+    </div>
+
     <div class="crop-modal-overlay" id="cropModalOverlay">
       <div class="crop-modal">
         <div class="crop-modal-header">
           <div>
             <div class="crop-modal-title">✂️ Crop Image</div>
-            <div class="crop-modal-hint">Drag to adjust · Pinch to zoom · Then tap Crop &amp; Scan</div>
+            <div class="crop-modal-hint">हरे किनारों / कोनों को खींचकर text को कस के घेरें · Pinch = zoom · फिर Crop &amp; Scan</div>
           </div>
         </div>
         <!-- Cropper.js attaches to this img -->

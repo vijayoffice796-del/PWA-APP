@@ -543,11 +543,16 @@ function openCropModal(src) {
   img.onload = () => {
     cropperInst = new Cropper(img, {
       viewMode   : 1,       // restrict crop box inside canvas
-      dragMode   : 'move',  // drag the image, not the box
-      autoCropArea: 0.85,   // default crop = 85% of image
-      movable    : true,
-      zoomable   : true,
+      dragMode   : 'none',  // v9: no accidental new box / image drag — the box itself is moved & resized
+      autoCropArea: 0.8,    // leaves a margin so every edge / corner handle is reachable
+      cropBoxMovable  : true,
+      cropBoxResizable: true,   // all 4 sides + 4 corners (big touch handles — see CSS)
+      toggleDragModeOnDblclick: false,
+      movable    : false,
+      zoomable   : true,    // pinch to zoom still works
+      zoomOnTouch: true,
       scalable   : false,
+      rotatable  : false,
       responsive : true,
       background : false,
       guides     : true,
@@ -593,13 +598,14 @@ $('cropScanBtn').addEventListener('click', () => {
   $('cropScanBtn').textContent = '⏳ Processing…';
   try {
     // getCroppedCanvas returns a <canvas> — convert to dataURL
-    const canvas   = cropperInst.getCroppedCanvas({
-      maxWidth : 2048,
-      maxHeight: 2048,
+    const raw      = cropperInst.getCroppedCanvas({
+      maxWidth : 1000,      // v9: Auto-Resize — never hand Tesseract more than 1000 px wide
+      maxHeight: 4000,
       imageSmoothingEnabled: true,
       imageSmoothingQuality: 'high',
     });
-    const dataUrl  = canvas.toDataURL('image/jpeg', 0.92);
+    const canvas   = ocrPreprocess(raw);   // v9: grayscale + contrast boost
+    const dataUrl  = canvas.toDataURL('image/png');
 
     // Show the cropped image as preview
     $('ocrPreview').src = dataUrl;
@@ -616,6 +622,55 @@ $('cropScanBtn').addEventListener('click', () => {
     $('cropScanBtn').textContent = '✂️ Crop & Scan';
   }
 });
+
+// ── v9: pre-processing (fast, Canvas only): downscale ≤1000 px → grayscale → percentile contrast stretch → S-curve (text goes dark, paper goes white) ──
+function ocrEnhancePixels(d) {                          // d = Uint8ClampedArray RGBA (modified in place) — pure, unit-testable
+  const n = d.length / 4, hist = new Uint32Array(256);
+  for (let i = 0, p = 0; i < n; i++, p += 4) { const g = (d[p] * 299 + d[p + 1] * 587 + d[p + 2] * 114) / 1000 | 0; d[p] = d[p + 1] = d[p + 2] = g; hist[g]++; }
+  let lo = 0, hi = 255, acc = 0; const cut = n * 0.02;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= cut) { lo = v; break; } }
+  acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= cut) { hi = v; break; } }
+  if (hi - lo < 16) { lo = Math.max(0, lo - 8); hi = Math.min(255, hi + 8); }
+  const lut = new Uint8ClampedArray(256), span = Math.max(1, hi - lo);
+  for (let v = 0; v < 256; v++) { let t = Math.min(1, Math.max(0, (v - lo) / span)); t = t * t * (3 - 2 * t); t = t * t * (3 - 2 * t); lut[v] = Math.round(t * 255); }   // double smoothstep = strong contrast, no hard threshold (robust to uneven light)
+  for (let p = 0; p < d.length; p += 4) { const g = lut[d[p]]; d[p] = d[p + 1] = d[p + 2] = g; d[p + 3] = 255; }
+  return d;
+}
+function ocrPreprocess(src) {
+  let c = src;
+  if (c.width > 1000) { const s = document.createElement('canvas'); s.width = 1000; s.height = Math.max(1, Math.round(c.height * 1000 / c.width)); const x = s.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(c, 0, 0, s.width, s.height); c = s; }
+  const ctx = c.getContext('2d', { willReadFrequently: true }), img = ctx.getImageData(0, 0, c.width, c.height);
+  ocrEnhancePixels(img.data); ctx.putImageData(img, 0, 0);
+  return c;
+}
+const OCR_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.';
+
+// ── v9: in-app camera — shutter goes STRAIGHT to the Crop screen (no OS "retake / OK" confirmation) ──
+let camStream = null;
+function stopCam() { if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } const v = $('camVideo'); if (v) v.srcObject = null; $('camModalOverlay').classList.remove('show'); }
+async function openCam() {
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    const v = $('camVideo'); v.srcObject = camStream; $('camModalOverlay').classList.add('show'); try { await v.play(); } catch (_) {}
+    return true;
+  } catch (err) { stopCam(); return false; }
+}
+let camLiveFailed = false;                                          // once the live camera fails (permission / no API) the native camera input is used
+$('ocrCamInput').addEventListener('click', e => {                  // intercept the label's file-picker click
+  if (camLiveFailed || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return;      // fallback → native camera input
+  e.preventDefault();
+  openCam().then(ok => { if (!ok) { camLiveFailed = true; toast('Live camera नहीं खुला — अब phone का camera app खुलेगा (दोबारा 📷 दबाएँ)', 'warn', 3000); } });
+});
+$('camShutterBtn').addEventListener('click', () => {
+  const v = $('camVideo'); if (!v.videoWidth) return;
+  const k = Math.min(1, 2048 / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k); c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  const url = c.toDataURL('image/jpeg', 0.92); stopCam();
+  $('ocrResultCard').style.display = 'none'; $('ocrPreview').classList.remove('show');
+  openCropModal(url);                                              // immediately → Crop UI, no confirmation step
+});
+$('camCloseBtn').addEventListener('click', stopCam);
+document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
 
 // ── runOCR: accepts File OR dataURL string ────────────────────────
 // All OCR extraction + addToLocalQueue logic UNCHANGED below
@@ -636,6 +691,7 @@ async function runOCR(source) {
           }
         },
       });
+      try { await ocrWorker.setParameters({ tessedit_char_whitelist: OCR_WHITELIST, preserve_interword_spaces: '1' }); } catch (_) {}   // v9: alphanumeric (+ / - .) only → no garbage symbols
     }
     $('ocrProgLabel').textContent = 'Text पहचाना जा रहा है…';
     $('ocrBar').style.width = '30%';
@@ -714,25 +770,12 @@ $('ocrSendQueueBtn').addEventListener('click', () => {
   const ocrTag  = $('fileTag')?.value?.trim() || '';
   if (!text) { toast('⚠️ Text box खाली है।', 'warn'); return; }
 
-  // Run same CNR extraction on the (possibly edited) text
-  const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
-  const found   = new Set();
-
-  // Logic 1: strict UPBL CNRs
-  (cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || []).forEach(m => found.add(m));
-
-  // Logic 2: fallback 12-char → prepend UPBL
-  let rem = cleaned;
-  found.forEach(c => { rem = rem.replace(c, ''); });
-  (rem.match(/[A-Z0-9]{2}\d{10}/g) || []).forEach(m => found.add('UPBL' + m));
-
-  if (!found.size) {
-    toast('❌ Text में कोई CNR pattern नहीं मिला।', 'err', 3000);
-    return;
-  }
-
-  for (const cnr of found) { addToLocalQueue(cnr, ocrTag, 'cnr'); }
-  toast('✅ ' + found.size + ' CNR queue में add हुए!', 'ok', 3000);
+  // v9: NO format validation — whatever is in the sandbox is sent (CNR, 20-char Challan, vehicle no., plain text). Only empty text is refused.
+  // One item per non-empty line (a single-line box = exactly one item); inner whitespace runs collapse to one space.
+  const items = text.split(/\r?\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (!items.length) { toast('⚠️ Text box खाली है।', 'warn'); return; }
+  items.forEach(it => addToLocalQueue(it, ocrTag, 'cnr'));
+  toast('✅ ' + items.length + ' item queue में add हुए!', 'ok', 3000);
   $('ocrResultBox').style.borderColor = 'var(--green)';
   setTimeout(() => { $('ocrResultBox').style.borderColor = ''; }, 2000);
 });
