@@ -13,16 +13,22 @@
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png"/>
   <link rel="icon" type="image/png" sizes="64x64" href="icons/icon64.png"/>
 
-  <!-- Firebase 8 compat CDN -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-  <!-- HTML5-QRCode -->
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-  <!-- Tesseract.js -->
-  <script src="https://unpkg.com/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
-  <!-- Cropper.js -->
+  <!-- Preconnect for faster TLS/DNS handshake on mobile networks -->
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin/>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin/>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin/>
+  <link rel="preconnect" href="https://court-automation-2-default-rtdb.firebaseio.com" crossorigin/>
+
+  <!-- Cropper.js CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css"/>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+
+  <!-- Deferred non-blocking scripts (execute in order without blocking first paint) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js" defer></script>
+  <script src="app.js" defer></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -423,8 +429,8 @@
 </head>
 <body>
 
-<!-- LOADING -->
-<div id="loadingOverlay" class="show">
+<!-- LOADING (non-blocking by default so UI renders immediately) -->
+<div id="loadingOverlay">
   <div class="spinner"></div>
   <div class="loading-txt" id="loadingTxt">Initializing…</div>
 </div>
@@ -454,7 +460,7 @@
   <div class="pc-bar">
     <div class="pc-bar-left">
       <span class="pc-dot check" id="pcDot"></span>
-      <span class="pc-lbl" id="pcLabel">Firebase check हो रहा है…</span>
+      <span class="pc-lbl" id="pcLabel">Firebase connect हो रहा है…</span>
     </div>
     <span class="pc-time" id="pcTime"></span>
   </div>
@@ -747,12 +753,14 @@
       <div class="settings-card">
         <div class="settings-hdr">📊 Connection Status</div>
         <div class="settings-body" style="font-size:12px;line-height:1.9;color:var(--slate-600);">
-          Firebase: <span id="cfgStatusLabel" style="font-weight:600;">Not configured</span><br>
+          Firebase: <span id="cfgStatusLabel" style="font-weight:600;">Connecting…</span><br>
           PC Status: <span id="cfgPcStatus"    style="font-weight:600;">—</span><br>
           DB URL:    <span id="cfgUrlDisplay"  style="font-family:monospace;font-size:11px;">—</span><br>
           Offline Queue: <span id="offlineQueueCount" style="font-weight:600;color:var(--red);">0 items</span>
+          <div style="margin-top:10px;">
+            <button class="btn btn-dark btn-sm" id="reconnectFbBtn" type="button">🔄 Reconnect Firebase</button>
+          </div>
         </div>
-
       </div>
     </div><!-- /tab-settings -->
 
@@ -773,6 +781,5 @@
 
 </div><!-- /appScreen -->
 
-<script src="app.js"></script>
 </body>
 </html>
