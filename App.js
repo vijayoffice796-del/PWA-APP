@@ -1,13 +1,11 @@
 // ================================================================
-//  app.js — Court Automation PWA  |  v4 (Speed & Workflow Upgrades)
+//  app.js — Court Automation PWA  |  v5 (UP-Prefix ⚡ + Cache Fix)
 //  Changes:
+//  - Lightning ⚡ 1-tap buttons now appear for ALL words starting with "UP"
+//    (plus auto-detected UPBL CNRs, cleaning dots like UPBL.360... -> UPBL360...)
+//  - Manual CNR defaults to editable "UPBL04" + numeric keypad
+//  - Comma-separated OCR word chip selection
 //  - Stable Firebase (.info/connected, 10s timeout, batch update())
-//  - QR Scanner fps=18 + native BarcodeDetector enabled
-//  - Quick-Tap Recent Tag Chips (last 4 tags)
-//  - Manual CNR input defaults to editable "UPBL04" + numeric pad
-//  - OCR tab pre-warms Tesseract worker in background
-//  - OCR 1-Tap Lightning CNR buttons (⚡) + comma-separated word chips
-//  - RAM cleanup on crop close / OCR clear
 // ================================================================
 'use strict';
 
@@ -699,7 +697,7 @@ $('manualInput').addEventListener('keydown', e => {
 });
 
 // ================================================================
-//  OCR + CROPPER.JS WORKFLOW (Pre-warmed Worker + 1-Tap CNR + Comma Chips)
+//  OCR + CROPPER.JS WORKFLOW (Pre-warmed Worker + ⚡ UP Words + Comma Chips)
 // ================================================================
 let ocrWorker     = null;
 let ocrWorkerInit = null;
@@ -876,24 +874,41 @@ $('camShutterBtn').addEventListener('click', () => {
 $('camCloseBtn').addEventListener('click', stopCam);
 document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
 
-function renderQuickCnrButtons(foundCNRs) {
+// Collect all UP-starting words (e.g. UPBL360000172011, UP32AB1234) + regex CNRs
+function extractUpQuickItems(text) {
+  const upSet = new Set();
+  const rawWords = String(text || '').toUpperCase().split(/\s+/);
+  for (const w of rawWords) {
+    // Strip dots/hyphens inside tokens like UPBL.360000012010 -> UPBL360000012010
+    const clean = w.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '').replace(/[.\-]/g, '');
+    if (/^UP[A-Z0-9]{2,}/.test(clean)) {
+      upSet.add(clean);
+    }
+  }
+  const compact = String(text || '').replace(/[\s\-.\n\r]/g, '').toUpperCase();
+  const strictMatches = compact.match(/UP[A-Z]{2}[A-Z0-9]{2}\d{10}/g) || [];
+  strictMatches.forEach(m => upSet.add(m));
+  return upSet;
+}
+
+function renderQuickCnrButtons(upItems) {
   const box = $('ocr-quick-cnr-box');
   if (!box) return;
   box.textContent = '';
-  if (!foundCNRs || !foundCNRs.size) {
+  if (!upItems || !upItems.size) {
     box.style.display = 'none';
     return;
   }
   box.style.display = 'flex';
-  foundCNRs.forEach(cnr => {
+  upItems.forEach(val => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'ocr-lightning-btn';
-    btn.textContent = '⚡ ' + cnr;
-    btn.title = '1-Tap Direct Queue';
+    btn.textContent = '⚡ ' + val;
+    btn.title = '1-Tap Direct Send to Queue';
     btn.addEventListener('click', () => {
       const ocrTag = $('fileTag')?.value?.trim() || '';
-      addToLocalQueue(cnr, ocrTag, 'cnr');
+      addToLocalQueue(val, ocrTag, 'cnr');
       btn.style.background = '#bbf7d0';
       btn.style.borderColor = '#16a34a';
       btn.style.color = '#14532d';
@@ -957,25 +972,15 @@ async function runOCR(source) {
     setTimeout(() => $('ocrProg').classList.remove('show'), 1500);
     toast('OCR complete! Confidence: ' + Math.round(confidence) + '%', 'ok', 3000);
 
-    const cleaned = text.replace(/[\s\-]/g, '').toUpperCase();
-    const foundCNRs = new Set();
-
-    const strictMatches = cleaned.match(/UPBL[A-Z0-9]{2}\d{10}/g) || [];
-    strictMatches.forEach(m => foundCNRs.add(m));
-
-    let remainder = cleaned;
-    foundCNRs.forEach(c => { remainder = remainder.replace(c, ''); });
-    const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
-    fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
-
-    renderQuickCnrButtons(foundCNRs);
+    const upItems = extractUpQuickItems(text);
+    renderQuickCnrButtons(upItems);
     renderOcrChips(text);
 
-    if (foundCNRs.size > 0) {
-      console.log('[PWA] OCR CNRs auto-detected:', [...foundCNRs]);
-      toast(foundCNRs.size + ' CNR मिले — ⚡ पर 1-tap करें या नीचे से चुनें।', 'ok', 3500);
+    if (upItems.size > 0) {
+      console.log('[PWA] OCR UP items auto-detected:', [...upItems]);
+      toast(upItems.size + ' UP नंबर मिले — ⚡ पर 1-tap करें या नीचे से चुनें।', 'ok', 3500);
     } else {
-      console.log('[PWA] OCR: no CNR pattern found');
+      console.log('[PWA] OCR: no UP pattern found');
       toast('OCR हो गया — words पर tap करें (comma से जुड़ेंगे) या Send करें।', 'warn', 3000);
     }
   } catch(err) {
@@ -1253,6 +1258,8 @@ async function boot() {
         $('manualInput').value = savedManualCNR;
       } else if (activeSearchType === 'cnr') {
         $('manualInput').value = DEFAULT_CNR_PREFIX;
+      } else {
+        $('manualInput').value = '';
       }
     }
 

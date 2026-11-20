@@ -22,13 +22,13 @@
   <!-- Cropper.js CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css"/>
 
-  <!-- Deferred non-blocking scripts (execute in order without blocking first paint) -->
+  <!-- Deferred non-blocking scripts (cache-busted app.js?v=5) -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=5" defer></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -183,7 +183,7 @@
       background:var(--indigo-lt); border-color:var(--indigo); color:var(--indigo-dk);
     }
 
-    /* ── OCR LIGHTNING 1-TAP CNR BUTTON ── */
+    /* ── OCR LIGHTNING 1-TAP UP BUTTON ── */
     .ocr-lightning-btn {
       background:#fef3c7; border:1.5px solid #f59e0b; color:#92400e;
       border-radius:8px; padding:6px 10px; font-size:12px; font-weight:700;
@@ -449,7 +449,7 @@
 </head>
 <body>
 
-<!-- LOADING (non-blocking by default so UI renders immediately) -->
+<!-- LOADING -->
 <div id="loadingOverlay">
   <div class="spinner"></div>
   <div class="loading-txt" id="loadingTxt">Initializing…</div>
@@ -615,8 +615,9 @@
           <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
         </label>
 
-        <!-- inputmode="numeric" opens numeric keypad directly on tap -->
+        <!-- Pre-filled with UPBL04 and opens numeric keypad on tap -->
         <input class="manual-input" type="text" inputmode="numeric" id="manualInput"
+          value="UPBL04"
           placeholder="CNR Number यहाँ लिखें… (comma से multiple)"
           autocomplete="off" autocorrect="off"
           autocapitalize="characters" spellcheck="false"/>
@@ -683,7 +684,7 @@
           </span>
         </div>
 
-        <!-- 1-Tap Lightning CNR Buttons -->
+        <!-- 1-Tap Lightning Buttons for all UP... words -->
         <div id="ocr-quick-cnr-box" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
 
         <!-- Smart Highlight Box: tap a highlighted word to append with comma to textarea -->
