@@ -172,6 +172,26 @@
     .btn-orange   { background:var(--orange);  color:#fff; }
     .btn-sm       { padding:7px 12px; font-size:12px; }
 
+    /* ── QUICK TAG CHIPS ── */
+    .quick-tag-chip {
+      background:var(--slate-100); border:1px solid var(--slate-300); color:var(--slate-700);
+      border-radius:16px; padding:4px 10px; font-size:11px; font-weight:600;
+      cursor:pointer; transition:all .15s; font-family:inherit; max-width:100%;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .quick-tag-chip:active, .quick-tag-chip.active {
+      background:var(--indigo-lt); border-color:var(--indigo); color:var(--indigo-dk);
+    }
+
+    /* ── OCR LIGHTNING 1-TAP CNR BUTTON ── */
+    .ocr-lightning-btn {
+      background:#fef3c7; border:1.5px solid #f59e0b; color:#92400e;
+      border-radius:8px; padding:6px 10px; font-size:12px; font-weight:700;
+      font-family:monospace; cursor:pointer; display:inline-flex; align-items:center; gap:4px;
+      transition:all .15s;
+    }
+    .ocr-lightning-btn:active { transform:scale(.96); background:#fde68a; }
+
     /* ── CONTINUOUS SCAN CHECKBOX ── */
     .check-row {
       display:flex; align-items:center; gap:10px; padding:10px 14px;
@@ -208,7 +228,7 @@
     .ct-radio.active-criminal { border-color:#dc2626;         background:#fef2f2;            color:#dc2626; }
 
     /* ── TAG DATALIST INPUT ── */
-    .tag-input-wrap { margin-bottom:10px; }
+    .tag-input-wrap { margin-bottom:8px; }
     .tag-input-wrap input[list] {
       width:100%; border:1.5px solid var(--slate-200); border-radius:8px;
       padding:10px 12px; font-size:13px; outline:none; background:#fff;
@@ -393,7 +413,7 @@
       color:var(--slate-700); word-break:break-all;
     }
     #ocr-highlight-box:empty::before {
-      content:'Highlighted terms यहाँ दिखेंगे — tap करें to extract';
+      content:'Highlighted terms यहाँ दिखेंगे — tap करें (comma से जुड़ेंगे)';
       color:var(--slate-400); font-size:12px; font-style:italic;
     }
     .cnr-highlight {
@@ -498,12 +518,14 @@
           <input list="tagOptions" id="fileTag" placeholder="Tag चुनें या type करें…" autocomplete="off"/>
           <datalist id="tagOptions"></datalist>
         </div>
+        <!-- 1-Tap Recent Quick Tag Chips -->
+        <div id="quickTagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
         <div style="font-size:10px;color:var(--slate-400);">
           Active tag: <b id="activeTagLabel" style="color:var(--indigo);">—</b>
         </div>
       </div>
 
-      <!-- Local Pending Queue Counter (Req 3 & 4 & 6) -->
+      <!-- Local Pending Queue Counter -->
       <div class="local-queue-bar">
         <div class="lq-left">
           <span class="lq-icon">📋</span>
@@ -534,7 +556,7 @@
         </div>
       </label>
 
-      <!-- Fix 6: Sync Offline Queue button moved here from Settings -->
+      <!-- Sync Offline Queue button -->
       <div style="margin-bottom:12px;">
         <button class="btn btn-dark btn-full" id="syncNowBtn">
           🔄 Sync Offline Firebase Queue
@@ -588,18 +610,18 @@
           </label>
         </div>
 
-<label class="urgent-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #fed7aa;background:#fff7ed;border-radius:10px;font-size:12px;font-weight:700;color:#9a3412;cursor:pointer;">
+        <label class="urgent-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #fed7aa;background:#fff7ed;border-radius:10px;font-size:12px;font-weight:700;color:#9a3412;cursor:pointer;">
           <input type="checkbox" id="urgentToggleQr" style="width:18px;height:18px;accent-color:#ea580c;"/> ⚡ Auto-Search (Urgent Mode)
           <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
         </label>
 
-        <!-- dynamic placeholder updates with searchType -->
-        <input class="manual-input" type="text" id="manualInput"
+        <!-- inputmode="numeric" opens numeric keypad directly on tap -->
+        <input class="manual-input" type="text" inputmode="numeric" id="manualInput"
           placeholder="CNR Number यहाँ लिखें… (comma से multiple)"
           autocomplete="off" autocorrect="off"
           autocapitalize="characters" spellcheck="false"/>
         <div style="font-size:10px;color:var(--slate-400);margin-bottom:8px;margin-top:-4px;">
-          Multiple entries: comma से अलग करें — e.g. <code>UPBL01..., UPBL02...</code><br>
+          Multiple entries: comma से अलग करें — e.g. <code>UPBL04..., UPBL04...</code><br>
           Case Number format: <code>Number/Year</code> — e.g. <code>123/2026, 45/2025</code>
         </div>
         <div style="display:flex;gap:8px;">
@@ -621,12 +643,12 @@
     ══════════════════════════════════ -->
     <div class="tab-panel" id="tab-ocr">
 
-<label class="urgent-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #fed7aa;background:#fff7ed;border-radius:10px;font-size:12px;font-weight:700;color:#9a3412;cursor:pointer;">
-          <input type="checkbox" id="urgentToggleOcr" style="width:18px;height:18px;accent-color:#ea580c;"/> ⚡ Auto-Search (Urgent Mode)
-          <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
-        </label>
+      <label class="urgent-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #fed7aa;background:#fff7ed;border-radius:10px;font-size:12px;font-weight:700;color:#9a3412;cursor:pointer;">
+        <input type="checkbox" id="urgentToggleOcr" style="width:18px;height:18px;accent-color:#ea580c;"/> ⚡ Auto-Search (Urgent Mode)
+        <span style="font-weight:400;font-size:10px;color:#c2410c;">ON रहने तक हर scan PC पर तुरंत search होगा</span>
+      </label>
 
-      <!-- v10: sticky Continuous Scan toggle — next to the camera trigger (outside the processing screen) -->
+      <!-- sticky Continuous Scan toggle -->
       <label class="global-setting" style="display:flex;align-items:center;gap:8px;padding:9px 10px;margin:0 0 10px;border:1.5px solid #bfdbfe;background:#eff6ff;border-radius:10px;font-size:12px;font-weight:700;color:#1e3a8a;cursor:pointer;">
         <input type="checkbox" id="continuousCamera" style="width:18px;height:18px;accent-color:#2563eb;"/> Enable Continuous Scan Loop
         <span style="font-weight:400;font-size:10px;color:#3b82f6;">Send के बाद camera अपने-आप फिर खुलेगा</span>
@@ -634,12 +656,10 @@
 
       <!-- Source buttons: Camera Capture + Upload -->
       <div class="ocr-source-row">
-        <!-- Camera capture -->
         <label class="ocr-upload-label" style="background:var(--slate-700);">
           <input type="file" id="ocrCamInput" accept="image/*" capture="environment"/>
           📷 Camera
         </label>
-        <!-- File upload -->
         <label class="ocr-upload-label">
           <input type="file" id="ocrInput" accept="image/*"/>
           🖼️ Upload Image
@@ -659,20 +679,24 @@
       <div class="card" id="ocrResultCard" style="display:none;">
         <div class="card-title">📄 Extracted Text
           <span style="font-size:10px;color:var(--slate-400);font-weight:400;">
-            (edit करें, फिर Send Queue करें)
+            (⚡ = 1-tap send · शब्दों पर tap = comma से जुड़ेंगे)
           </span>
         </div>
-        <!-- Smart Highlight Box: tap a highlighted word to copy to textarea -->
+
+        <!-- 1-Tap Lightning CNR Buttons -->
+        <div id="ocr-quick-cnr-box" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+
+        <!-- Smart Highlight Box: tap a highlighted word to append with comma to textarea -->
         <div id="ocr-highlight-box" contenteditable="false"></div>
 
-        <!-- Editable textarea instead of read-only div -->
+        <!-- Editable textarea -->
         <textarea id="ocrResultBox"
           style="width:100%;min-height:100px;max-height:200px;resize:vertical;
             border:1.5px solid var(--slate-200);border-radius:8px;padding:10px;
             font-size:12px;font-family:monospace;line-height:1.6;
             color:var(--slate-700);background:var(--slate-50);outline:none;
             transition:border-color .2s;box-sizing:border-box;"
-          placeholder="ऊपर के words पर tap करें — वे यहाँ जुड़ते जाएँगे (या खुद टाइप करें)…"
+          placeholder="ऊपर के words पर tap करें — वे comma (,) से जुड़ते जाएँगे (या खुद टाइप करें)…"
           spellcheck="false" autocorrect="off" autocapitalize="off"
         ></textarea>
         <div style="display:flex;gap:8px;margin-top:8px;">
@@ -687,7 +711,7 @@
           </button>
         </div>
         <div style="font-size:10px;color:var(--slate-400);margin-top:5px;">
-          💡 "Send to Queue" text से CNR निकालकर local queue में डालेगा
+          💡 "Send to Queue" comma (,) या नई लाइन से अलग सभी आइटम्स को queue में डालेगा
         </div>
       </div>
 
@@ -700,7 +724,6 @@
     <!-- ══════════════════════════════════
          CROP MODAL (global — outside tabs)
     ══════════════════════════════════ -->
-    <!-- v9: live camera (shutter → Crop screen directly) -->
     <div class="cam-overlay" id="camModalOverlay">
       <video id="camVideo" autoplay playsinline muted></video>
       <div class="cam-bar"><button class="cam-close" id="camCloseBtn" type="button">✕ Close</button><button class="cam-shutter" id="camShutterBtn" type="button" aria-label="Capture"></button><span style="width:72px"></span></div>
@@ -715,7 +738,6 @@
             <div class="crop-modal-hint">हरे किनारों / कोनों को खींचकर text को कस के घेरें · Pinch = zoom · Landscape हो तो ↻ दबाएँ · फिर Crop &amp; Scan</div>
           </div>
         </div>
-        <!-- Cropper.js attaches to this img -->
         <div class="crop-img-wrap">
           <img id="cropperImg" src="" alt="Crop"/>
         </div>

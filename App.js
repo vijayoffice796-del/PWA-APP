@@ -1,22 +1,24 @@
 // ================================================================
-//  app.js — Court Automation PWA  |  v3 (Stable Firebase & Fast Sync)
-//  Fixes:
-//  - Real-time .info/connected socket monitor + auto-reconnect
-//  - Atomic batch update() for instant PC sync (no 30s sequential loop)
-//  - 10s write timeout + socket recovery on half-open connections
-//  - Clean Firebase app re-init when Settings URL changes
-//  - Auto-sync on boot, reconnect, and app foreground resume
+//  app.js — Court Automation PWA  |  v4 (Speed & Workflow Upgrades)
+//  Changes:
+//  - Stable Firebase (.info/connected, 10s timeout, batch update())
+//  - QR Scanner fps=18 + native BarcodeDetector enabled
+//  - Quick-Tap Recent Tag Chips (last 4 tags)
+//  - Manual CNR input defaults to editable "UPBL04" + numeric pad
+//  - OCR tab pre-warms Tesseract worker in background
+//  - OCR 1-Tap Lightning CNR buttons (⚡) + comma-separated word chips
+//  - RAM cleanup on crop close / OCR clear
 // ================================================================
 'use strict';
 
 // ── Firebase state ───────────────────────────────────────────────
-let db          = null;
-let presenceRef = null;
-let connRef     = null;
-let pcOnline    = false;
-let fbReady     = false;
-let fbConnected = false;
-let isSyncing   = false;
+let db             = null;
+let presenceRef    = null;
+let connRef        = null;
+let pcOnline       = false;
+let fbReady        = false;
+let fbConnected    = false;
+let isSyncing      = false;
 let reconnectTimer = null;
 
 // ── Hardcoded Firebase defaults ──────────────────────────────────
@@ -30,6 +32,7 @@ let FB_APIKEY = FB_DEFAULTS.apiKey;
 let FB_PREFIX = '/automation';
 
 const FB_WRITE_TIMEOUT_MS = 10000;
+const DEFAULT_CNR_PREFIX  = 'UPBL04';
 
 function normalizePrefix(p) {
   let s = String(p || '/automation').trim();
@@ -66,8 +69,9 @@ const SCAN_LOCK_MS  = 1500;
 // Offline-first local queue + pairing session
 let localPendingQueue = [];
 let activeSession     = null;
-const LPQ_KEY     = 'pwa_local_pending_queue';
-const SESSION_KEY = 'pwa_active_session';
+const LPQ_KEY         = 'pwa_local_pending_queue';
+const SESSION_KEY     = 'pwa_active_session';
+const RECENT_TAGS_KEY = 'ca_recent_tags';
 
 // ── DOM ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -136,13 +140,14 @@ function addToLocalQueue(cnr, tag, searchType) {
     status:'pending', source:'pwa',
   };
   if (isUrgentOn()) item.isUrgent = true;
+  if (tag) saveRecentTag(tag);
   lqAdd(item);
   if (item.isUrgent) urgentAutoSend();
   toast('Queued: ' + item.cnr + ' (' + localPendingQueue.length + ' total)', 'ok', 2000);
 }
 
 // ================================================================
-//  TAG ARRAYS
+//  TAG ARRAYS & QUICK-TAP RECENT TAG CHIPS
 // ================================================================
 const commonTags = [
   'Summons / Notices (समन / नोटिस)',
@@ -181,6 +186,51 @@ const criminalTags = [
   'Plaintiff Hostile (वादी पक्षद्रोही)',
   'Accused Hostile (अभियुक्त पक्षद्रोही)',
 ];
+
+function getRecentTags() {
+  try {
+    const raw = localStorage.getItem(RECENT_TAGS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr) && arr.length) return arr;
+  } catch(_) {}
+  return [
+    'Evidence (साक्ष्य / गवाही)',
+    'Summons / Notices (समन / नोटिस)',
+    'Final Argument (अंतिम बहस)',
+    'Urgent (अति आवश्यक)',
+  ];
+}
+
+function saveRecentTag(tag) {
+  const t = String(tag || '').trim();
+  if (!t) return;
+  const list = getRecentTags().filter(x => x !== t);
+  list.unshift(t);
+  try { localStorage.setItem(RECENT_TAGS_KEY, JSON.stringify(list.slice(0, 4))); } catch(_) {}
+  renderQuickTagChips();
+}
+
+function renderQuickTagChips() {
+  const wrap = $('quickTagChips');
+  if (!wrap) return;
+  const cur = $('fileTag')?.value?.trim() || '';
+  const tags = getRecentTags();
+  wrap.textContent = '';
+  tags.forEach(t => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'quick-tag-chip' + (cur === t ? ' active' : '');
+    btn.textContent = t.split(' (')[0];
+    btn.title = t;
+    btn.addEventListener('click', () => {
+      $('fileTag').value = t;
+      $('activeTagLabel').textContent = t;
+      localStorage.setItem('ca_last_tag', t);
+      renderQuickTagChips();
+    });
+    wrap.appendChild(btn);
+  });
+}
 
 // ================================================================
 //  updateTagList() — rebuilds <datalist> based on radio selection
@@ -225,11 +275,14 @@ $('fileTag').addEventListener('change', () => {
   const val = $('fileTag').value;
   $('activeTagLabel').textContent = val || '—';
   localStorage.setItem('ca_last_tag', val);
+  if (val.trim()) saveRecentTag(val.trim());
+  else renderQuickTagChips();
 });
 $('fileTag').addEventListener('input', () => {
   const val = $('fileTag').value;
   $('activeTagLabel').textContent = val || '—';
   localStorage.setItem('ca_last_tag', val);
+  renderQuickTagChips();
 });
 
 // ================================================================
@@ -316,7 +369,6 @@ function startConnectionListener() {
     if (fbConnected) {
       if (statusLbl) statusLbl.textContent = '🟢 Connected (Live)';
       console.log('[PWA] Firebase socket connected ✅');
-      // Auto-sync any pending items as soon as socket comes online
       setTimeout(() => {
         syncOfflineQueue();
         autoSyncLocalQueue();
@@ -365,7 +417,7 @@ function updatePcStatus(state, ts) {
 }
 
 // ================================================================
-//  TAB NAVIGATION (3 tabs: qr, ocr, settings)
+//  TAB NAVIGATION (pre-warm OCR worker when OCR tab is opened)
 // ================================================================
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -373,11 +425,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     $(`tab-${btn.dataset.tab}`).classList.add('active');
+    if (btn.dataset.tab === 'ocr') {
+      ensureOcrWorker().catch(() => {});
+    }
   });
 });
 
 // ================================================================
-//  QR SCANNER
+//  QR SCANNER (fps=18 + native BarcodeDetector enabled)
 // ================================================================
 $('contScanRow').addEventListener('click', () => {
   const cb = $('continuousScan'); cb.checked = !cb.checked;
@@ -399,10 +454,13 @@ async function startCamera() {
     const devices = await Html5Qrcode.getCameras();
     if (!devices?.length) throw new Error('कोई camera नहीं मिला।');
     const cam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length-1];
-    qrScanner = new Html5Qrcode('qr-reader');
+    qrScanner = new Html5Qrcode('qr-reader', {
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      verbose: false,
+    });
     await qrScanner.start(
       { deviceId: { exact: cam.id } },
-      { fps:10, qrbox:{width:240,height:240}, aspectRatio:1.0, disableFlip:false },
+      { fps:18, qrbox:{width:240,height:240}, aspectRatio:1.0, disableFlip:false },
       onQRSuccess, onQRError
     );
     scannerRunning = true;
@@ -438,7 +496,6 @@ function onQRSuccess(text, result) {
   setTimeout(() => { scanLocked = false; }, SCAN_LOCK_MS);
   lastCode = text; lastScanTime = now;
   playBeep();
-  // Intercept pairing QR — do NOT add to queue
   if (text.startsWith('court_session_')) {
     activeSession = text;
     localStorage.setItem(SESSION_KEY, text);
@@ -449,7 +506,6 @@ function onQRSuccess(text, result) {
     if (localPendingQueue.length) autoSyncLocalQueue();
     return;
   }
-  // Normal scan → local queue
   scanCount++; $('scanCountDisplay').textContent = scanCount;
   displayQRResult(text, result);
   const tag        = $('fileTag').value.trim();
@@ -486,14 +542,32 @@ function playBeep() {
 }
 
 // ================================================================
-//  MANUAL SEND (reads tag from fileTag — same as QR)
+//  MANUAL SEND (default UPBL04 for CNR + numeric pad)
 // ================================================================
+function setManualDefaultForType(searchType) {
+  const inp = $('manualInput');
+  if (!inp) return;
+  if (searchType === 'case_number') {
+    if (inp.value.trim().toUpperCase() === DEFAULT_CNR_PREFIX) {
+      inp.value = '';
+      localStorage.removeItem('ca_manual_cnr');
+    }
+  } else {
+    if (!inp.value.trim()) {
+      inp.value = DEFAULT_CNR_PREFIX;
+    }
+  }
+}
+
 $('manualSendBtn').addEventListener('click', async () => {
   const raw        = $('manualInput').value.trim();
   const tag        = $('fileTag').value.trim();
   const searchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
 
-  if (!raw) { toast('⚠️ Input खाली है!', 'warn'); return; }
+  if (!raw || (searchType === 'cnr' && raw.toUpperCase() === DEFAULT_CNR_PREFIX)) {
+    toast('⚠️ पूरा CNR / Case Number लिखें!', 'warn');
+    return;
+  }
 
   const items = raw.split(',').map(s => s.trim()).filter(Boolean);
   if (!items.length) { toast('⚠️ Valid input नहीं मिला।', 'warn'); return; }
@@ -510,8 +584,9 @@ $('manualSendBtn').addEventListener('click', async () => {
   items.forEach(item => addToLocalQueue(item, tag, searchType));
   const sent = items.length;
 
-  $('manualInput').value = '';
   localStorage.removeItem('ca_manual_cnr');
+  $('manualInput').value = searchType === 'cnr' ? DEFAULT_CNR_PREFIX : '';
+
   const label = searchType === 'case_number' ? 'Case Number' : 'CNR';
   $('manualOk').textContent = `✅ ${sent} ${label}(s) queued`;
   $('manualOk').classList.add('show');
@@ -520,9 +595,9 @@ $('manualSendBtn').addEventListener('click', async () => {
 $('manualClearBtn').addEventListener('click', () => {
   $('manualInput').value = '';
   localStorage.removeItem('ca_manual_cnr');
+  $('manualInput').focus();
 });
 
-// Clear local queue
 $('clearLocalQueueBtn').addEventListener('click', () => {
   if (!localPendingQueue.length) { toast('Queue empty.', 'warn'); return; }
   if (!confirm(localPendingQueue.length + ' items clear karein?')) return;
@@ -576,7 +651,6 @@ async function pushLocalQueueBatch(isAuto = false) {
   try {
     db.goOnline();
     await withTimeout(sessionRef.update(updates), FB_WRITE_TIMEOUT_MS, 'Sync timeout (10s) — Firebase से जवाब नहीं मिला');
-    // Remove only the items we actually sent (preserves any items scanned mid-flight)
     localPendingQueue = localPendingQueue.slice(toSend.length);
     lqSave();
     toast((isAuto ? '✅ Auto-sync: ' : '✅ ') + toSend.length + ' items PC को भेजे गए!', 'ok', 3500);
@@ -602,29 +676,62 @@ $('syncToPCBtn').addEventListener('click', async () => {
   }
 });
 
-// Update placeholder when searchType changes
+// Update placeholder + default prefix when searchType changes
 document.querySelectorAll('input[name="searchType"]').forEach(r => {
   r.addEventListener('change', () => {
     const isCN = r.value === 'case_number';
     $('manualInput').placeholder = isCN
       ? 'Case Number: 123/2026, 45/2025…'
-      : 'CNR Number: UPBL01..., UPBL02… (comma se multiple)';
+      : 'CNR Number: UPBL04..., UPBL04… (comma se multiple)';
+    setManualDefaultForType(r.value);
   });
 });
 $('manualInput').addEventListener('input', () => {
   const val = $('manualInput').value;
-  if (val) localStorage.setItem('ca_manual_cnr', val);
-  else     localStorage.removeItem('ca_manual_cnr');
+  if (val && val.trim().toUpperCase() !== DEFAULT_CNR_PREFIX) {
+    localStorage.setItem('ca_manual_cnr', val);
+  } else {
+    localStorage.removeItem('ca_manual_cnr');
+  }
 });
 $('manualInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') $('manualSendBtn').click();
 });
 
 // ================================================================
-//  OCR + CROPPER.JS WORKFLOW
+//  OCR + CROPPER.JS WORKFLOW (Pre-warmed Worker + 1-Tap CNR + Comma Chips)
 // ================================================================
-let ocrWorker   = null;
-let cropperInst = null;
+let ocrWorker     = null;
+let ocrWorkerInit = null;
+let cropperInst   = null;
+
+async function ensureOcrWorker(onProgress) {
+  if (ocrWorker) return ocrWorker;
+  if (typeof Tesseract === 'undefined') {
+    throw new Error('Tesseract OCR अभी लोड हो रहा है, कृपया कुछ सेकंड बाद पुनः प्रयास करें।');
+  }
+  if (!ocrWorkerInit) {
+    ocrWorkerInit = (async () => {
+      const worker = await Tesseract.createWorker('eng', 1, {
+        logger: m => {
+          if (typeof onProgress === 'function') onProgress(m);
+        },
+      });
+      try {
+        await worker.setParameters({
+          tessedit_char_whitelist: OCR_WHITELIST,
+          preserve_interword_spaces: '1',
+        });
+      } catch (_) {}
+      ocrWorker = worker;
+      return worker;
+    })().catch(err => {
+      ocrWorkerInit = null;
+      throw err;
+    });
+  }
+  return ocrWorkerInit;
+}
 
 function openCropModal(src) {
   if (typeof Cropper === 'undefined') {
@@ -659,6 +766,8 @@ function openCropModal(src) {
 
 function closeCropModal() {
   if (cropperInst) { cropperInst.destroy(); cropperInst = null; }
+  const img = $('cropperImg');
+  if (img) img.src = '';
   $('cropModalOverlay').classList.remove('show');
 }
 
@@ -666,6 +775,7 @@ function onImageSelected(file) {
   if (!file) return;
   $('ocrResultCard').style.display = 'none';
   $('ocrPreview').classList.remove('show');
+  $('ocrPreview').src = '';
   const reader = new FileReader();
   reader.onload = e => openCropModal(e.target.result);
   reader.readAsDataURL(file);
@@ -760,11 +870,41 @@ $('camShutterBtn').addEventListener('click', () => {
   const k = Math.min(1, 2048 / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement('canvas');
   c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k); c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
   const url = c.toDataURL('image/jpeg', 0.92); stopCam();
-  $('ocrResultCard').style.display = 'none'; $('ocrPreview').classList.remove('show');
+  $('ocrResultCard').style.display = 'none'; $('ocrPreview').classList.remove('show'); $('ocrPreview').src = '';
   openCropModal(url);
 });
 $('camCloseBtn').addEventListener('click', stopCam);
 document.addEventListener('visibilitychange', () => { if (document.hidden && camStream) stopCam(); });
+
+function renderQuickCnrButtons(foundCNRs) {
+  const box = $('ocr-quick-cnr-box');
+  if (!box) return;
+  box.textContent = '';
+  if (!foundCNRs || !foundCNRs.size) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'flex';
+  foundCNRs.forEach(cnr => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ocr-lightning-btn';
+    btn.textContent = '⚡ ' + cnr;
+    btn.title = '1-Tap Direct Queue';
+    btn.addEventListener('click', () => {
+      const ocrTag = $('fileTag')?.value?.trim() || '';
+      addToLocalQueue(cnr, ocrTag, 'cnr');
+      btn.style.background = '#bbf7d0';
+      btn.style.borderColor = '#16a34a';
+      btn.style.color = '#14532d';
+      if ($('continuousCamera') && $('continuousCamera').checked) {
+        clearOcrUi();
+        setTimeout(openCamera, 250);
+      }
+    });
+    box.appendChild(btn);
+  });
+}
 
 function renderOcrChips(text) {
   const box = $('ocr-highlight-box'); if (!box) return;
@@ -777,33 +917,37 @@ function renderOcrChips(text) {
   if (!seen.size) { const em = document.createElement('em'); em.style.color = '#94a3b8'; em.textContent = 'कोई word नहीं मिला — दोबारा scan करें'; box.appendChild(em); }
 }
 
+function clearOcrUi() {
+  $('ocrPreview').classList.remove('show');
+  $('ocrPreview').src = '';
+  $('ocrResultCard').style.display = 'none';
+  $('ocrResultBox').value = '';
+  const hlBox = $('ocr-highlight-box');
+  if (hlBox) hlBox.innerHTML = '';
+  const qBox = $('ocr-quick-cnr-box');
+  if (qBox) { qBox.innerHTML = ''; qBox.style.display = 'none'; }
+  $('ocrInput').value = ''; $('ocrCamInput').value = '';
+  closeCropModal();
+}
+
 async function runOCR(source) {
-  if (typeof Tesseract === 'undefined') {
-    toast('Tesseract OCR अभी लोड हो रहा है, कृपया कुछ सेकंड बाद पुनः प्रयास करें।', 'warn', 3500);
-    return;
-  }
   $('ocrProg').classList.add('show'); $('ocrBar').style.width = '0%';
   $('ocrProgLabel').textContent = 'Tesseract.js शुरू हो रहा है…';
   try {
-    if (!ocrWorker) {
-      ocrWorker = await Tesseract.createWorker('eng', 1, {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            $('ocrBar').style.width = Math.round(m.progress * 100) + '%';
-            $('ocrProgLabel').textContent = 'Recognizing… ' + Math.round(m.progress * 100) + '%';
-          } else if (m.status === 'loading tesseract core') {
-            $('ocrProgLabel').textContent = 'Core load हो रहा है…';
-          } else if (m.status === 'loading language traineddata') {
-            $('ocrProgLabel').textContent = 'Language data load हो रहा है…';
-          }
-        },
-      });
-      try { await ocrWorker.setParameters({ tessedit_char_whitelist: OCR_WHITELIST, preserve_interword_spaces: '1' }); } catch (_) {}
-    }
+    const worker = await ensureOcrWorker(m => {
+      if (m.status === 'recognizing text') {
+        $('ocrBar').style.width = Math.round(m.progress * 100) + '%';
+        $('ocrProgLabel').textContent = 'Recognizing… ' + Math.round(m.progress * 100) + '%';
+      } else if (m.status === 'loading tesseract core') {
+        $('ocrProgLabel').textContent = 'Core load हो रहा है…';
+      } else if (m.status === 'loading language traineddata') {
+        $('ocrProgLabel').textContent = 'Language data load हो रहा है…';
+      }
+    });
     $('ocrProgLabel').textContent = 'Text पहचाना जा रहा है…';
     $('ocrBar').style.width = '30%';
 
-    const { data: { text: rawText, confidence } } = await ocrWorker.recognize(source);
+    const { data: { text: rawText, confidence } } = await worker.recognize(source);
     const text = String(rawText || '').toUpperCase();
 
     $('ocrBar').style.width = '100%';
@@ -824,14 +968,15 @@ async function runOCR(source) {
     const fallbackMatches = remainder.match(/[A-Z0-9]{2}\d{10}/g) || [];
     fallbackMatches.forEach(m => foundCNRs.add('UPBL' + m));
 
+    renderQuickCnrButtons(foundCNRs);
     renderOcrChips(text);
 
     if (foundCNRs.size > 0) {
       console.log('[PWA] OCR CNRs auto-detected:', [...foundCNRs]);
-      toast(foundCNRs.size + ' CNR मिले — tap करें या "Send to Queue" दबाएं।', 'ok', 3500);
+      toast(foundCNRs.size + ' CNR मिले — ⚡ पर 1-tap करें या नीचे से चुनें।', 'ok', 3500);
     } else {
       console.log('[PWA] OCR: no CNR pattern found');
-      toast('OCR हो गया — highlighted terms tap करें या edit करके Send करें।', 'warn', 3000);
+      toast('OCR हो गया — words पर tap करें (comma से जुड़ेंगे) या Send करें।', 'warn', 3000);
     }
   } catch(err) {
     $('ocrProgLabel').textContent = 'Error: ' + err.message;
@@ -845,44 +990,45 @@ $('ocrCopyBtn').addEventListener('click', () => {
   navigator.clipboard.writeText(t).then(() => toast('📋 Copied!', 'ok', 2000));
 });
 
+// Tap-to-Add with comma: tapping a word chip appends ", word" to the sandbox
 $('ocr-highlight-box').addEventListener('click', function(e) {
   const span = e.target.closest('.cnr-highlight');
   if (!span) return;
   const word = span.dataset.cnr || span.textContent || '';
   if (!word) return;
-  const box = $('ocrResultBox'); box.value = box.value + word + ' ';
+  const box = $('ocrResultBox');
+  const cur = box.value.trimEnd();
+  if (!cur) {
+    box.value = word;
+  } else if (cur.endsWith(',')) {
+    box.value = cur + ' ' + word;
+  } else {
+    box.value = cur + ', ' + word;
+  }
   box.scrollTop = box.scrollHeight;
   span.classList.add('tapped');
   setTimeout(function() { span.classList.remove('tapped'); }, 1200);
 });
 
+// Send to Queue from OCR text (supports comma-separated & newline-separated items)
 $('ocrSendQueueBtn').addEventListener('click', () => {
   const text    = $('ocrResultBox').value.trim();
   const ocrTag  = $('fileTag')?.value?.trim() || '';
   if (!text) { toast('⚠️ Text box खाली है।', 'warn'); return; }
 
-  const items = text.split(/\r?\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const items = text.split(/[\r\n,]+/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   if (!items.length) { toast('⚠️ Text box खाली है।', 'warn'); return; }
   items.forEach(it => addToLocalQueue(it, ocrTag, 'cnr'));
   toast('✅ ' + items.length + ' item queue में add हुए!', 'ok', 3000);
   if ($('continuousCamera') && $('continuousCamera').checked) {
-    $('ocrResultBox').value = ''; const hb = $('ocr-highlight-box'); if (hb) hb.textContent = '';
-    $('ocrResultCard').style.display = 'none'; $('ocrPreview').classList.remove('show');
+    clearOcrUi();
     setTimeout(openCamera, 250);
     return;
   }
   $('ocrResultBox').style.borderColor = 'var(--green)';
   setTimeout(() => { $('ocrResultBox').style.borderColor = ''; }, 2000);
 });
-$('ocrClearBtn').addEventListener('click', () => {
-  $('ocrPreview').classList.remove('show');
-  $('ocrResultCard').style.display = 'none';
-  $('ocrResultBox').value = '';
-  const hlBox = $('ocr-highlight-box');
-  if (hlBox) hlBox.innerHTML = '';
-  $('ocrInput').value = ''; $('ocrCamInput').value = '';
-  closeCropModal();
-});
+$('ocrClearBtn').addEventListener('click', clearOcrUi);
 
 // ================================================================
 //  SETTINGS — Firebase Config Save (supports live URL switching)
@@ -1098,10 +1244,16 @@ async function boot() {
       $('fileTag').value = savedTag;
       $('activeTagLabel').textContent = savedTag;
     }
+    renderQuickTagChips();
 
     const savedManualCNR = localStorage.getItem('ca_manual_cnr') || '';
-    if (savedManualCNR && $('manualInput')) {
-      $('manualInput').value = savedManualCNR;
+    const activeSearchType = document.querySelector('input[name="searchType"]:checked')?.value || 'cnr';
+    if ($('manualInput')) {
+      if (savedManualCNR) {
+        $('manualInput').value = savedManualCNR;
+      } else if (activeSearchType === 'cnr') {
+        $('manualInput').value = DEFAULT_CNR_PREFIX;
+      }
     }
 
     lqLoad();
